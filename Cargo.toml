@@ -1,0 +1,31 @@
+[package]
+name = "melchior"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+description = "A zero-dependency agent harness for agentic work over very large datasets, built around Leviathan and the Cordis plugin model"
+repository = "https://github.com/magilabsco/Melchior"
+keywords = ["agent", "llm", "leviathan", "mcp", "harness"]
+categories = ["command-line-utilities"]
+publish = false
+
+# This crate deliberately has no [dependencies]. Everything it needs is in
+# std; TLS is delegated to the system curl binary (see docs/SECURITY.md).
+
+[[bin]]
+name = "melchior"
+path = "src/main.rs"
+
+[lib]
+name = "melchior"
+path = "src/lib.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "unwind"
+
+[lints.rust]
+unsafe_code = "forbid"

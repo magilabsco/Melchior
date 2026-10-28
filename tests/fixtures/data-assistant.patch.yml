@@ -1,0 +1,37 @@
+# A data assistant: no shell, no file tools, no web; it works only through
+# Leviathan and the tools its host gateway grants. The persona and model come
+# from the environment, as a host passes them.
+- id: system-prompt
+  config:
+    personaPrefix: !!js process.env.AGENT_PROMPT
+- id: llm-pi-ai
+  config:
+    providers:
+      openrouter:
+        apiKeyEnv: MODEL_API_KEY
+        baseURL: !!js process.env.MODEL_BASE_URL
+        models: !!js '[{ id: process.env.AGENT_MODEL }]'
+- id: llm-deepseek
+  disabled: true
+- id: leviathan
+  config:
+    autoStart: false
+- id: tool-bash
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-str-replace-editor
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: tool-subagent
+  disabled: true
+- id: tool-web
+  disabled: true
+# DeepSeek Harness plugins Melchior does not have are ignored when disabled.
+- id: tool-ralph
+  disabled: true
