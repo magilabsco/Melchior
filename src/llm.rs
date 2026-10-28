@@ -119,6 +119,27 @@ impl OpenAiCompatible {
             .filter(|k| !k.trim().is_empty())
     }
 
+    fn key_source(&self) -> String {
+        match (&self.api_key, &self.api_key_env) {
+            (Some(_), _) => "the configured `apiKey`".into(),
+            (None, Some(env)) => env.clone(),
+            (None, None) => "the API key".into(),
+        }
+    }
+
+    fn missing_key(&self) -> String {
+        let env = self.api_key_env.as_deref().unwrap_or("OPENROUTER_API_KEY");
+        let how = if self.base_url.contains("openrouter.ai") {
+            format!("set {env} to an OpenRouter key (https://openrouter.ai/keys)")
+        } else {
+            format!("set {env} to a key for {}", self.base_url)
+        };
+        format!(
+            "no API key for the model: {how}, or configure another OpenAI-compatible provider \
+             (README, \"Choose a model\")"
+        )
+    }
+
     pub fn body(&self, request: &ChatRequest<'_>) -> Json {
         let mut body = jobj! {
             "model" => request.model,
@@ -177,7 +198,15 @@ impl OpenAiCompatible {
                 .and_then(|j| j.get("error").get("message").as_str().map(str::to_string))
                 .unwrap_or_else(|| crate::util::truncate(text.trim(), 600, "…"));
             let retryable = matches!(status, 408 | 409 | 425 | 429 | 500 | 502 | 503 | 504 | 529);
-            return Err((LlmError { message: format!("model provider returned HTTP {status}: {detail}"), retryable }, retry_after));
+            let message = match status {
+                401 | 403 => format!(
+                    "the model provider rejected {} (HTTP {status}: {detail}); check that it is a valid key for {}",
+                    self.key_source(),
+                    self.base_url
+                ),
+                _ => format!("model provider returned HTTP {status}: {detail}"),
+            };
+            return Err((LlmError { message, retryable }, retry_after));
         }
         let streaming = response.header("content-type").map(|v| v.contains("event-stream")).unwrap_or(false);
         if !streaming {
@@ -253,6 +282,10 @@ impl Provider for OpenAiCompatible {
         on_delta: &mut dyn FnMut(Delta<'_>),
         cancel: &AtomicBool,
     ) -> Result<ChatOutput, LlmError> {
+        // Local model servers commonly run without a key.
+        if self.key().is_none() && !is_loopback(&self.base_url) {
+            return Err(LlmError { message: self.missing_key(), retryable: false });
+        }
         let body = self.body(request);
         let mut attempt = 0;
         loop {
@@ -432,6 +465,14 @@ fn parse_complete(value: &Json) -> Result<ChatOutput, LlmError> {
     })
 }
 
+fn is_loopback(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let host = rest.split(['/', '?']).next().unwrap_or("");
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    let host = if host.starts_with('[') { host.split(']').next().unwrap_or("").trim_start_matches('[') } else { host.split(':').next().unwrap_or("") };
+    host.eq_ignore_ascii_case("localhost") || host == "::1" || host.starts_with("127.") || host == "0.0.0.0"
+}
+
 /// Pick the provider for `initialize({provider})`.
 pub fn select(registry: &Arc<LlmRegistry>, provider: &str) -> Option<Arc<Box<dyn Provider>>> {
     registry.get(provider)
@@ -467,5 +508,28 @@ mod tests {
         assert_eq!(output.reasoning_details[0].get("text").as_str(), Some("think more"));
         assert_eq!(output.finish_reason, "tool_calls");
         assert_eq!(output.usage.get("total_tokens").as_i64(), Some(12));
+    }
+
+    #[test]
+    fn a_missing_key_fails_before_any_request_and_says_what_to_set() {
+        let env = "MELCHIOR_TEST_UNSET_KEY";
+        let provider = OpenAiCompatible::from_config("openrouter", &jobj! { "apiKeyEnv" => env }, "https://openrouter.ai/api/v1", "X");
+        let request = ChatRequest { model: "m", messages: &[], tools: &[], tool_choice: None, max_tokens: None, reasoning_effort: None };
+        let error = provider.chat(&request, &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        assert!(!error.retryable);
+        assert!(error.message.contains(&format!("set {env} to an OpenRouter key")), "{}", error.message);
+
+        let other = OpenAiCompatible::from_config("p", &jobj! { "apiKeyEnv" => env }, "https://api.example.com/v1", "X");
+        assert!(other.missing_key().contains(&format!("set {env} to a key for https://api.example.com/v1")));
+    }
+
+    #[test]
+    fn local_model_servers_need_no_key() {
+        for url in ["http://localhost:11434/v1", "http://127.0.0.1:8080", "http://[::1]:8000/v1", "http://0.0.0.0:1234"] {
+            assert!(is_loopback(url), "{url}");
+        }
+        for url in ["https://openrouter.ai/api/v1", "https://localhost.example.com/v1", "http://10.0.0.5:8000"] {
+            assert!(!is_loopback(url), "{url}");
+        }
     }
 }
