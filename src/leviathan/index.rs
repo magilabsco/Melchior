@@ -90,9 +90,36 @@ pub fn render_briefing(describe: &Json, names: &ToolNames) -> String {
         plural(record, records),
         plural(group, groups)
     ));
+    // Dates the index could not parse are stored raw: cut at characters.
+    let day = |d: &str| d.chars().take(10).collect::<String>();
     match (describe.get("date_min").as_str(), describe.get("date_max").as_str()) {
-        (Some(min), Some(max)) => out.push_str(&format!(", dated {} to {}.\n", &min[..min.len().min(10)], &max[..max.len().min(10)])),
+        (Some(min), Some(max)) => out.push_str(&format!(", dated {} to {}.\n", day(min), day(max))),
         _ => out.push_str(".\n"),
+    }
+    let kinds: Vec<String> = describe
+        .get("kinds")
+        .items()
+        .iter()
+        .map(|k| {
+            let records = k.get("records").as_i64().unwrap_or(0);
+            let fields = k.get("fields");
+            let mut parts = vec![format!("{records} {}", plural(k.get("record").str_or("record"), records))];
+            if let Some(g) = fields.get("group").as_str() {
+                parts.push(format!("grouped by {g}"));
+            }
+            if let Some(d) = fields.get("date").at(0).as_str() {
+                parts.push(format!("dated by {d}"));
+            }
+            format!("{} ({})", k.get("name").str_or("?"), parts.join(", "))
+        })
+        .collect();
+    if !kinds.is_empty() {
+        out.push_str(&format!(
+            "It holds {} kinds of record: {}. Ids read `<kind>:<id>`; filter one kind with `where _kind=<kind>`, \
+             count each with `by: _kind`. Records of different kinds that share a group belong to the same entity.\n",
+            kinds.len(),
+            kinds.join("; ")
+        ));
     }
     let largest: Vec<String> = describe
         .get("largest_groups")
@@ -259,6 +286,27 @@ mod tests {
         assert!(!recall.contains("noise"));
         assert!(recall.contains("8 more matches"));
         assert!(render_recall(&json::parse(r#"{"results":[]}"#).unwrap(), 0.15, &names()).is_none());
+    }
+
+    #[test]
+    fn briefs_each_kind_and_survives_odd_dates() {
+        let describe = json::parse(
+            r#"{"about":{"record":"record","group":"group"},"record_count":5,"group_count":2,
+                "date_min":"2024年3月11日 午後","date_max":"2024年3月11日 午後",
+                "kinds":[{"name":"tickets","record":"ticket","group":"customer","records":3,
+                          "fields":{"id":"id","group":"customer_id","date":["opened"]}},
+                         {"name":"customers","record":"customer","group":"customer","records":2,
+                          "fields":{"id":"id","group":"id"}}],
+                "filters":[{"field":"_kind","distinct":2,"top":[["tickets",3],["customers",2]]}]}"#,
+        )
+        .unwrap();
+        let text = render_briefing(&describe, &names());
+        assert!(text.contains("dated 2024年3月11日 to 2024年3月11日"), "{text}");
+        assert!(
+            text.contains("2 kinds of record: tickets (3 tickets, grouped by customer_id, dated by opened); customers (2 customers, grouped by id)"),
+            "{text}"
+        );
+        assert!(text.contains("where _kind=<kind>"));
     }
 
     #[test]

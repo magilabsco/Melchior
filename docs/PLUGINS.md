@@ -186,8 +186,8 @@ Behaviour:
 | --- | --- | --- |
 | `tools` | true | Register Leviathan's tools as `leviathan_*` / `memory_*` (local and remote backends) |
 | `indexTool` | true | Offer `leviathan_index` (local backends) |
-| `autoIndex` | true | Before the first model call, index the workspace's large data files (CSV/TSV, JSON Lines, JSON) with an inferred mapping: the implicit index, or a configured index file that does not exist yet |
-| `autoIndexMinBytes` | 1048576 | Smallest file `autoIndex` considers |
+| `autoIndex` | true | Before the first model call, index every data file and SQLite table in the workspace (CSV/TSV, JSON Lines, JSON holding records, `.gz`), a kind of record per dataset, with inferred mappings: the implicit index, or a configured index file that does not exist yet |
+| `autoIndexMinBytes` | 1048576 | JSON files at least this large are indexed without checking that they hold records |
 | `indexTimeoutSeconds` | 3600 | Longest an indexing run may take |
 | `briefing` | true | Index summary in the system prompt |
 | `recall` | true | Search with each user message and attach the top records |

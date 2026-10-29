@@ -88,14 +88,17 @@ cd ~/exports
 melchior "Which customers hit the SSO login loop after release 4.2?"
 ```
 
-Before the first model call, Melchior indexes every data file of 1 MB or
-more in the folder with Leviathan. This step makes no model calls and costs
-no tokens: about 2 seconds for 100,000 records (64 MB), about 20 seconds for
-a million (650 MB). The agent then answers
-from the index: it searches, counts, sums and ranks without reading the
-files into its context. The index is kept per folder under
-`~/.melchior/leviathan/`, so later runs in the same folder start from it.
-Smaller files, or files you name, the agent indexes itself when it needs to.
+Before the first model call, Melchior indexes every data file in the folder
+and its subfolders with Leviathan: CSV and TSV, JSON Lines, JSON that holds
+records, gzipped versions of these, and every table of SQLite databases.
+Files of different kinds (tickets, customers, orders) become one index with
+a kind for each, and records that refer to the same customer or machine are
+grouped together across them. This step makes no model calls and costs no
+tokens: about 2 seconds for 100,000 records (64 MB), about 20 seconds for a
+million (650 MB). The agent then answers from the index: it searches,
+counts, sums and ranks without reading the files into its context. The
+index is kept per folder under `~/.melchior/leviathan/`, so later runs in the
+same folder start from it, and it is rebuilt only when the files change.
 
 ### Index once, reuse it, and keep memory
 
@@ -150,7 +153,7 @@ cargo clippy --all-targets
 
 | | What the model gets |
 | --- | --- |
-| **Automatic indexing** | At session start, the workspace's data files of 1 MB or more are indexed before the first model call (`autoIndex`), so the model starts with an index instead of raw files. |
+| **Automatic indexing** | At session start, every data file and SQLite table in the workspace is indexed before the first model call (`autoIndex`), a kind of record per dataset, so the model starts with an index instead of raw files. |
 | **Briefing** | What is indexed: record and group counts, largest groups, date range, filter fields, and how to search. When nothing is indexed yet, how to index. |
 | **Recall** | The user's message is searched before the first model call; the top cards arrive with it as `<workspace_recall>`, persisted with the turn. |
 | **Tools** | `leviathan_search`, `leviathan_get`, `leviathan_resolve_group`, `leviathan_describe`, `leviathan_aggregate` for exact counts, sums and rankings (when the installed Leviathan provides it), and `leviathan_index` for new data. |

@@ -94,18 +94,29 @@ same tools.
 ### Automatic indexing
 
 Before the first model call of a session, Melchior indexes the workspace's
-large data files itself (`autoIndex`, on by default; files of at least
-`autoIndexMinBytes`, 1 MB): no model turn, no tokens, and the first message
-already gets a briefing on the data and recall. Leviathan infers the mapping.
+data itself (`autoIndex`, on by default): no model turn, no tokens, and the
+first message already gets a briefing on the data and recall.
 
-- One index holds one record shape, so the largest set of files that share a
-  shape (CSV header, or JSON keys) is indexed; the briefing names the others.
+- **What is data:** CSV, TSV, JSON Lines and their `.gz` versions of any size;
+  every table of SQLite files (`.sqlite`, `.sqlite3`, `.db` with a SQLite
+  header); and JSON files that hold records (an array, or an object wrapping
+  an array of objects) or are at least `autoIndexMinBytes` (1 MB). Tool
+  configuration (`package.json`, lock files, `tsconfig.json`, ...), hidden
+  files and folders, `node_modules`, `target`, virtual environments and the
+  harness home are skipped. Up to six folder levels and 1,000 files, largest
+  first.
+- **One index, several kinds:** Leviathan sorts the files into kinds of
+  record by their fields and infers a mapping for each. Records carry the
+  filter `_kind` and ids `<kind>:<id>`; a kind whose ids another kind groups
+  by (customers, referenced by tickets' `customer_id`) joins those groups, so
+  one group holds a customer's record, tickets and orders. The briefing lists
+  the kinds.
 - Only an index Melchior manages is written: the implicit per-workspace
   index, or a configured `index` that does not exist yet. An existing
   configured index is never rebuilt behind the user's back.
 - Rebuilds are cheap: Leviathan skips a build when the sources did not change.
-- The inferred mapping has no `group`; the agent can re-index with
-  `leviathan_index` when scoped search by entity would help.
+- The agent can re-index with `leviathan_index` to set fields inference
+  missed, such as a `group`.
 
 ### `leviathan_index`
 

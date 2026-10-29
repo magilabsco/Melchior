@@ -587,7 +587,7 @@ impl Plugin for LeviathanPlugin {
         let auto = match &indexer {
             Some((backend, index)) if config.auto_index => {
                 let managed = implicit || !index.exists();
-                let exclude = [Some(runtime.home.clone()), index.parent().map(Path::to_path_buf)].into_iter().flatten().collect();
+                let exclude = vec![runtime.home.clone()];
                 Some(Arc::new(auto::AutoIndex::new(
                     leviathan.clone(),
                     backend.clone(),

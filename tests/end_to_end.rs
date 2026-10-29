@@ -377,9 +377,10 @@ fn indexes_and_searches_with_a_local_leviathan() {
     let (home, workspace) = (root.join("home"), root.join("workspace"));
     std::fs::write(workspace.join("tickets.csv"), TICKETS).unwrap();
     let patch = root.join("model.patch.yml");
+    // Automatic indexing off: this test is about the agent indexing data itself.
     std::fs::write(
         &patch,
-        "- id: llm-pi-ai\n  config:\n    providers:\n      openrouter:\n        apiKeyEnv: MODEL_API_KEY\n        baseURL: !!js process.env.MODEL_BASE_URL\n- id: llm-deepseek\n  disabled: true\n",
+        "- id: llm-pi-ai\n  config:\n    providers:\n      openrouter:\n        apiKeyEnv: MODEL_API_KEY\n        baseURL: !!js process.env.MODEL_BASE_URL\n- id: llm-deepseek\n  disabled: true\n- id: leviathan\n  config:\n    autoIndex: false\n",
     )
     .unwrap();
     let (index, memory) = (root.join("data/tickets.db"), root.join("data/memory.db"));
@@ -475,8 +476,76 @@ fn workspace_data_is_indexed_before_the_first_model_call() {
     let first = &requests[0];
     assert!(tool_names(first).contains(&"leviathan_search".to_string()), "{:?}", tool_names(first));
     let system = first.get("messages").at(0).get("content").str_or("");
-    assert!(system.contains("It holds 3 ") && system.contains("indexed tickets.csv for you"), "{system}");
+    assert!(system.contains("It holds 3 ") && system.contains("indexed the workspace's data before this conversation"), "{system}");
+    assert!(system.contains("tickets.csv"), "{system}");
     assert!(first.get("messages").at(1).to_string().contains("<workspace_recall"), "recall on the first message");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// A workspace with several kinds of record in several formats is indexed as
+/// one index with a kind each; tool configuration is left out.
+#[test]
+fn every_kind_of_workspace_data_is_indexed_together() {
+    let Some(bin) = leviathan_binary() else {
+        eprintln!("skipped: no leviathan binary (set LEVIATHAN_BIN or put leviathan on PATH)");
+        return;
+    };
+    let help = Command::new(&bin).args(["upsert", "--help"]).output().unwrap();
+    if !String::from_utf8_lossy(&help.stdout).contains("--kind") {
+        eprintln!("skipped: this leviathan predates several kinds per index");
+        return;
+    }
+    let requests = Arc::new(Mutex::new(Vec::<Json>::new()));
+    let seen = requests.clone();
+    let port = serve(Arc::new(move |path, _headers, request| {
+        if path != "/v1/chat/completions" {
+            return ("404 Not Found", "text/plain", String::new());
+        }
+        seen.lock().unwrap().push(request.clone());
+        model_reply(None, "Acme Corp: 2 open tickets.")
+    }));
+    let root = temp_dir("kinds");
+    let (home, workspace) = (root.join("home"), root.join("workspace"));
+    std::fs::create_dir_all(workspace.join("exports")).unwrap();
+    std::fs::write(
+        workspace.join("tickets.csv"),
+        "\u{feff}id;customer_id;subject;status\nT-1;C-1;Login loop;open\nT-2;C-2;Invoice wrong;closed\nT-3;C-1;Export slow;open\n",
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.join("exports/customers.json"),
+        "{\n  \"data\": {\"customers\": [\n    {\"id\": \"C-1\", \"name\": \"Acme Corp\"},\n    {\"id\": \"C-2\", \"name\": \"Globex\"}\n  ]}\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.join("orders.jsonl"),
+        "{\"order\":\"O-1\",\"customer_id\":\"C-1\",\"total\":120.5}\n{\"order\":\"O-2\",\"customer_id\":\"C-2\",\"total\":42}\n",
+    )
+    .unwrap();
+    std::fs::write(workspace.join("package.json"), "{\"name\": \"tooling\", \"files\": [\"a\"]}").unwrap();
+    std::fs::write(
+        home.join("settings.yaml"),
+        format!("llm-pi-ai:\n  providers:\n    openrouter:\n      baseURL: http://127.0.0.1:{port}/v1\n"),
+    )
+    .unwrap();
+    let path = format!("{}:/usr/bin:/bin", bin.parent().unwrap().display());
+    let output = Command::new(env!("CARGO_BIN_EXE_melchior"))
+        .arg("How many open tickets does Acme have?")
+        .env_clear()
+        .env("PATH", path)
+        .env("MELCHIOR_HOME", &home)
+        .env("OPENROUTER_API_KEY", "model-key")
+        .current_dir(&workspace)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let requests = requests.lock().unwrap();
+    let system = requests[0].get("messages").at(0).get("content").str_or("").to_string();
+    assert!(system.contains("It holds 3 kinds of record"), "{system}");
+    for kind in ["tickets (3 tickets", "customers (2 customers", "orders (2 orders"] {
+        assert!(system.contains(kind), "{kind}: {system}");
+    }
+    assert!(!system.contains("package"), "tool configuration is not data: {system}");
     let _ = std::fs::remove_dir_all(&root);
 }
 
