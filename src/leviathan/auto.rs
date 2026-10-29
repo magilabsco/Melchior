@@ -125,8 +125,10 @@ fn is_data(path: &Path, bytes: u64, json_min_bytes: u64) -> bool {
     false
 }
 
-/// Data files under `root`, largest first.
+/// Data files under `root`, largest first. Symlinks are not followed and
+/// every file must resolve inside `root`, as for the file tools.
 pub fn scan(root: &Path, json_min_bytes: u64, exclude: &[PathBuf]) -> Vec<DataFile> {
+    let Ok(canonical_root) = root.canonicalize() else { return Vec::new() };
     let mut found = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut seen = 0usize;
@@ -138,6 +140,9 @@ pub fn scan(root: &Path, json_min_bytes: u64, exclude: &[PathBuf]) -> Vec<DataFi
                 break;
             }
             let path = entry.path();
+            if entry.file_type().map_or(true, |t| t.is_symlink()) {
+                continue;
+            }
             let Ok(meta) = entry.metadata() else { continue };
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with('.') || exclude.iter().any(|e| path.starts_with(e)) {
@@ -149,7 +154,8 @@ pub fn scan(root: &Path, json_min_bytes: u64, exclude: &[PathBuf]) -> Vec<DataFi
                 }
                 continue;
             }
-            if meta.is_file() && is_data(&path, meta.len(), json_min_bytes) {
+            let inside = path.canonicalize().is_ok_and(|p| p.starts_with(&canonical_root));
+            if meta.is_file() && inside && is_data(&path, meta.len(), json_min_bytes) {
                 found.push(DataFile { path, bytes: meta.len() });
             }
         }
@@ -271,14 +277,12 @@ impl AutoIndex {
 
     fn build(&self, runtime: &Runtime, files: &[DataFile]) -> Result<(bool, String), String> {
         let mut command = Command::new(&self.bin);
-        command.arg("--json").arg("index");
+        // Options first, then `--`: a file name is never read as a flag.
+        command.arg("--json").arg("index").arg("--index").arg(&self.index).arg("--quiet").arg("--");
         for f in files {
             command.arg(&f.path);
         }
         command
-            .arg("--index")
-            .arg(&self.index)
-            .arg("--quiet")
             .env_clear()
             .envs(runtime.child_env())
             .current_dir(&runtime.cwd)
@@ -367,6 +371,22 @@ mod tests {
         let excluded = scan(&root, 1 << 20, &[root.join("exports")]);
         assert!(!names(&excluded).contains(&"more.ndjson".into()), "excluded paths are skipped");
         fs::remove_dir_all(root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_out_of_the_workspace_are_not_followed() {
+        let outside = dir("outside");
+        fs::write(outside.join("secrets.csv"), "user,password\na,b\n").unwrap();
+        fs::create_dir_all(outside.join("more")).unwrap();
+        fs::write(outside.join("more/rows.jsonl"), "{\"id\":1}\n").unwrap();
+        let root = dir("links");
+        fs::write(root.join("mine.csv"), "id\n1\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("secrets.csv"), root.join("linked.csv")).unwrap();
+        std::os::unix::fs::symlink(outside.join("more"), root.join("linked_dir")).unwrap();
+        assert_eq!(names(&scan(&root, 1 << 20, &[])), ["mine.csv"]);
+        fs::remove_dir_all(root).ok();
+        fs::remove_dir_all(outside).ok();
     }
 
     #[test]
