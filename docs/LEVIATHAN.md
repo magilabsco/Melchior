@@ -24,7 +24,8 @@ working with the user.
 ## Connecting to Leviathan
 
 Leviathan is its own program (Apache-2.0, `cargo install leviathan-index`;
-0.2 or newer for memory and `serve`), so Melchior keeps no dependencies and
+0.3 or newer for several kinds per index, every SQLite table and the full
+`aggregate`; 0.2 for memory and `serve`), so Melchior keeps no dependencies and
 talks to it over MCP. The `leviathan`
 plugin picks one **backend**:
 

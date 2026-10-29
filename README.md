@@ -54,7 +54,7 @@ You need:
 | --- | --- | --- |
 | Rust 1.89 or newer | To build Melchior | [rustup.rs](https://rustup.rs) |
 | `curl` | Melchior makes HTTPS requests through it | Already on macOS and most Linux systems |
-| [Leviathan](https://github.com/elstongun/leviathan) | Indexing, search and memory. Melchior runs without it, but this is what it is built around | `cargo install leviathan-index` |
+| [Leviathan](https://github.com/elstongun/leviathan) 0.3+ | Indexing, search and memory. Melchior runs without it, but this is what it is built around | `cargo install leviathan-index` |
 | Bubblewrap (Linux) | The sandbox for the `bash` tool | `sudo apt install bubblewrap` or `sudo dnf install bubblewrap` |
 | A model API key | OpenRouter by default; DeepSeek or any OpenAI-compatible API also work | [openrouter.ai/keys](https://openrouter.ai/keys) |
 

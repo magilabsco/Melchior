@@ -158,9 +158,11 @@ pub fn render_briefing(describe: &Json, names: &ToolNames) -> String {
         }
         if let Some(aggregate) = &names.aggregate {
             out.push_str(&format!(
-                " For how many, how much, or which has the most, use `{aggregate}`: exact counts, sums, averages, \
-                 minimums and maximums over every matching record, in total or by {group}, year, month or filter value. \
-                 Use it instead of writing a script over the data; search and aggregate answer from the index in milliseconds."
+                " For how many, how many different, how much, or which has the most, use `{aggregate}`: exact counts, \
+                 distinct counts, sums, averages, minimums and maximums over every matching record, in total or by {group}, \
+                 year, month or any field, or two at once ({group},month), and only records meeting number conditions \
+                 (hours>4). Use it instead of writing a script over the data; search and aggregate answer from the index \
+                 in milliseconds."
             ));
         }
         if let Some(get) = &names.get {
@@ -270,7 +272,7 @@ mod tests {
         assert!(text.contains("120 records across 3 sources, dated 2026-01-02 to 2026-10-01"), "{text}");
         assert!(text.contains("kind (table_row, document)"));
         assert!(text.contains("`leviathan_search`"));
-        assert!(text.contains("use `leviathan_aggregate`") && text.contains("by source, year, month"), "{text}");
+        assert!(text.contains("use `leviathan_aggregate`") && text.contains("by source, year, month or any field"), "{text}");
         assert!(text.contains("without your prefix"));
 
         let search = json::parse(
