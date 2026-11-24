@@ -26,8 +26,16 @@ impl AgentConfig {
     pub fn from_json(config: &Json) -> AgentConfig {
         AgentConfig {
             max_rounds: config.get("maxRounds").as_i64().unwrap_or(40).clamp(1, 500) as usize,
-            context_chars: config.get("contextChars").as_i64().unwrap_or(600_000).max(20_000) as usize,
-            tool_output_chars: config.get("toolOutputChars").as_i64().unwrap_or(40_000).max(1_000) as usize,
+            context_chars: config
+                .get("contextChars")
+                .as_i64()
+                .unwrap_or(600_000)
+                .max(20_000) as usize,
+            tool_output_chars: config
+                .get("toolOutputChars")
+                .as_i64()
+                .unwrap_or(40_000)
+                .max(1_000) as usize,
             stream_deltas: config.get("streamDeltas").as_bool().unwrap_or(true),
         }
     }
@@ -66,27 +74,65 @@ impl Agent {
     }
 
     /// Run one user turn to completion. The caller has marked the session busy.
-    pub fn run_turn(&self, session: &Arc<Session>, message_id: &str, text: &str, depth: usize) -> TurnOutcome {
+    pub fn run_turn(
+        &self,
+        session: &Arc<Session>,
+        message_id: &str,
+        text: &str,
+        depth: usize,
+    ) -> TurnOutcome {
         session.cancel.store(false, Ordering::SeqCst);
         self.runtime.notifier.session_status(&session.id, "running");
         let outcome = self.turn(session, message_id, text, depth);
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(error) => {
-                util::log(util::Level::Error, "agent", &format!("{}: turn failed: {error}", session.id));
-                let text = format!("I couldn't finish this answer because the agent runtime hit an error: {error}");
-                self.emit(session, "assistant/message", assistant_event(&util::new_id("msg"), &text, &[], true));
-                let _ = self.persist(session, "turn/end", jobj! { "reason" => jobj! { "kind" => "error", "message" => error.as_str() } });
-                self.emit(session, "turn/end", jobj! { "reason" => jobj! { "kind" => "error", "message" => error } });
-                TurnOutcome { text, reason: "error".into(), usage: Json::Null }
+                util::log(
+                    util::Level::Error,
+                    "agent",
+                    &format!("{}: turn failed: {error}", session.id),
+                );
+                let text = format!(
+                    "I couldn't finish this answer because the agent runtime hit an error: {error}"
+                );
+                self.emit(
+                    session,
+                    "assistant/message",
+                    assistant_event(&util::new_id("msg"), &text, &[], true),
+                );
+                let _ = self.persist(
+                    session,
+                    "turn/end",
+                    jobj! { "reason" => jobj! { "kind" => "error", "message" => error.as_str() } },
+                );
+                self.emit(
+                    session,
+                    "turn/end",
+                    jobj! { "reason" => jobj! { "kind" => "error", "message" => error } },
+                );
+                TurnOutcome {
+                    text,
+                    reason: "error".into(),
+                    usage: Json::Null,
+                }
             }
         };
         self.runtime.notifier.session_status(&session.id, "idle");
         outcome
     }
 
-    fn turn(&self, session: &Arc<Session>, message_id: &str, text: &str, depth: usize) -> Result<TurnOutcome, String> {
-        self.persist(session, "message/user", jobj! { "id" => message_id, "content" => text })?;
+    fn turn(
+        &self,
+        session: &Arc<Session>,
+        message_id: &str,
+        text: &str,
+        depth: usize,
+    ) -> Result<TurnOutcome, String> {
+        self.persist(
+            session,
+            "message/user",
+            jobj! { "id" => message_id, "content" => text },
+        )?;
         self.emit(
             session,
             "agent/inbox/spliced",
@@ -98,9 +144,19 @@ impl Agent {
         );
         if depth == 0 {
             for (key, hook) in self.hooks.all() {
-                let cx = TurnCx { app: &self.app, runtime: &self.runtime, session, message_id, text };
+                let cx = TurnCx {
+                    app: &self.app,
+                    runtime: &self.runtime,
+                    session,
+                    message_id,
+                    text,
+                };
                 let produced = catch_unwind(AssertUnwindSafe(|| hook(&cx))).unwrap_or_else(|_| {
-                    util::log(util::Level::Error, "agent", &format!("turn hook {key} panicked"));
+                    util::log(
+                        util::Level::Error,
+                        "agent",
+                        &format!("turn hook {key} panicked"),
+                    );
                     None
                 });
                 if let Some(context) = produced {
@@ -109,7 +165,11 @@ impl Agent {
                         "message/context",
                         jobj! { "messageId" => message_id, "source" => context.source.as_str(), "text" => context.text.as_str() },
                     )?;
-                    self.emit(session, "context/added", jobj! { "source" => context.source, "chars" => context.text.len() });
+                    self.emit(
+                        session,
+                        "context/added",
+                        jobj! { "source" => context.source, "chars" => context.text.len() },
+                    );
                 }
             }
         }
@@ -153,10 +213,17 @@ impl Agent {
                 "usage" => output.usage.clone(),
             };
             if !output.reasoning_details.is_empty() {
-                data.set("reasoningDetails", Json::Arr(output.reasoning_details.clone()));
+                data.set(
+                    "reasoningDetails",
+                    Json::Arr(output.reasoning_details.clone()),
+                );
             }
             self.persist(session, "message/assistant", data)?;
-            self.emit(session, "assistant/message", assistant_event(&assistant_id, &output.text, &calls, false));
+            self.emit(
+                session,
+                "assistant/message",
+                assistant_event(&assistant_id, &output.text, &calls, false),
+            );
             if !output.text.trim().is_empty() {
                 final_text = output.text.clone();
             }
@@ -203,27 +270,66 @@ impl Agent {
             rounds += 1;
         }
         if final_text.trim().is_empty() && reason == "stop" {
-            final_text = "I wasn't able to produce an answer for that. Please try rephrasing the question.".into();
-            self.emit(session, "assistant/message", assistant_event(&util::new_id("msg"), &final_text, &[], true));
+            final_text =
+                "I wasn't able to produce an answer for that. Please try rephrasing the question."
+                    .into();
+            self.emit(
+                session,
+                "assistant/message",
+                assistant_event(&util::new_id("msg"), &final_text, &[], true),
+            );
         }
         let usage = usage.to_json();
-        self.persist(session, "turn/end", jobj! { "reason" => jobj! { "kind" => reason.as_str() }, "usage" => usage.clone() })?;
-        self.emit(session, "turn/end", jobj! { "reason" => jobj! { "kind" => reason.as_str() }, "usage" => usage.clone() });
+        self.persist(
+            session,
+            "turn/end",
+            jobj! { "reason" => jobj! { "kind" => reason.as_str() }, "usage" => usage.clone() },
+        )?;
+        self.emit(
+            session,
+            "turn/end",
+            jobj! { "reason" => jobj! { "kind" => reason.as_str() }, "usage" => usage.clone() },
+        );
         if depth == 0 {
-            let cx = TurnEndCx { session, message_id, text, answer: &final_text, reason: &reason };
+            let cx = TurnEndCx {
+                session,
+                message_id,
+                text,
+                answer: &final_text,
+                reason: &reason,
+            };
             for (key, hook) in self.end_hooks.all() {
                 if catch_unwind(AssertUnwindSafe(|| hook(&cx))).is_err() {
-                    util::log(util::Level::Error, "agent", &format!("turn-end hook {key} panicked"));
+                    util::log(
+                        util::Level::Error,
+                        "agent",
+                        &format!("turn-end hook {key} panicked"),
+                    );
                 }
             }
         }
-        Ok(TurnOutcome { text: final_text, reason, usage })
+        Ok(TurnOutcome {
+            text: final_text,
+            reason,
+            usage,
+        })
     }
 
-    fn call_model(&self, session: &Arc<Session>, tool_defs: &[Json], force_answer: bool) -> Result<ChatOutput, String> {
-        let tool_names: Vec<String> =
-            tool_defs.iter().filter_map(|t| t.get("function").get("name").as_str().map(str::to_string)).collect();
-        let system = self.prompt.build(&PromptCx { runtime: &self.runtime, session, tool_names: &tool_names });
+    fn call_model(
+        &self,
+        session: &Arc<Session>,
+        tool_defs: &[Json],
+        force_answer: bool,
+    ) -> Result<ChatOutput, String> {
+        let tool_names: Vec<String> = tool_defs
+            .iter()
+            .filter_map(|t| t.get("function").get("name").as_str().map(str::to_string))
+            .collect();
+        let system = self.prompt.build(&PromptCx {
+            runtime: &self.runtime,
+            session,
+            tool_names: &tool_names,
+        });
         let mut messages = build_messages(&system, &session.records());
         if force_answer {
             messages.push(jobj! { "role" => "user", "content" => FINAL_NUDGE });
@@ -239,19 +345,36 @@ impl Agent {
         };
         let stream = self.config.stream_deltas;
         let mut on_delta = |delta: Delta<'_>| match delta {
-            Delta::Text(text) if stream => self.emit(session, "assistant/delta", jobj! { "text" => text }),
-            Delta::Reasoning(text) if stream => self.emit(session, "assistant/reasoning", jobj! { "text" => text }),
-            Delta::Retry(attempt, error) => {
-                self.emit(session, "assistant/retry", jobj! { "attempt" => attempt as i64, "error" => error })
+            Delta::Text(text) if stream => {
+                self.emit(session, "assistant/delta", jobj! { "text" => text })
             }
+            Delta::Reasoning(text) if stream => {
+                self.emit(session, "assistant/reasoning", jobj! { "text" => text })
+            }
+            Delta::Retry(attempt, error) => self.emit(
+                session,
+                "assistant/retry",
+                jobj! { "attempt" => attempt as i64, "error" => error },
+            ),
             _ => {}
         };
-        self.provider.chat(&request, &mut on_delta, &session.cancel).map_err(|e| e.message)
+        self.provider
+            .chat(&request, &mut on_delta, &session.cancel)
+            .map_err(|e| e.message)
     }
 
-    fn execute(&self, session: &Arc<Session>, call_id: &str, name: &str, arguments: &str, depth: usize) -> ToolOutput {
+    fn execute(
+        &self,
+        session: &Arc<Session>,
+        call_id: &str,
+        name: &str,
+        arguments: &str,
+        depth: usize,
+    ) -> ToolOutput {
         let Some(tool) = self.tools.get(name) else {
-            return ToolOutput::err(format!("unknown tool {name:?}; use one of the tools you were given"));
+            return ToolOutput::err(format!(
+                "unknown tool {name:?}; use one of the tools you were given"
+            ));
         };
         let args = if arguments.trim().is_empty() {
             Json::obj()
@@ -259,12 +382,23 @@ impl Agent {
             match json::parse(arguments) {
                 Ok(value @ Json::Obj(_)) => value,
                 Ok(_) => return ToolOutput::err("tool arguments must be a JSON object"),
-                Err(e) => return ToolOutput::err(format!("tool arguments are not valid JSON ({e}); send a JSON object")),
+                Err(e) => {
+                    return ToolOutput::err(format!(
+                        "tool arguments are not valid JSON ({e}); send a JSON object"
+                    ));
+                }
             }
         };
-        let cx = ToolCx { app: &self.app, runtime: &self.runtime, session, call_id, depth };
-        catch_unwind(AssertUnwindSafe(|| tool.call(&cx, &args)))
-            .unwrap_or_else(|_| ToolOutput::err(format!("tool {name} crashed; this is a harness bug")))
+        let cx = ToolCx {
+            app: &self.app,
+            runtime: &self.runtime,
+            session,
+            call_id,
+            depth,
+        };
+        catch_unwind(AssertUnwindSafe(|| tool.call(&cx, &args))).unwrap_or_else(|_| {
+            ToolOutput::err(format!("tool {name} crashed; this is a harness bug"))
+        })
     }
 }
 
@@ -330,7 +464,14 @@ impl Usage {
             "tokenUsageReported" => self.token_usage_reported,
             "costReported" => self.cost_reported,
         };
-        usage.set("cost", if self.cost_reported { Json::from(self.cost) } else { Json::Null });
+        usage.set(
+            "cost",
+            if self.cost_reported {
+                Json::from(self.cost)
+            } else {
+                Json::Null
+            },
+        );
         usage
     }
 }
@@ -345,18 +486,24 @@ pub fn build_messages(system: &str, records: &[Json]) -> Vec<Json> {
     if !system.is_empty() {
         messages.push(jobj! { "role" => "system", "content" => system });
     }
-    let last_user = records.iter().rposition(|r| r.get("type").as_str() == Some("message/user"));
+    let last_user = records
+        .iter()
+        .rposition(|r| r.get("type").as_str() == Some("message/user"));
     let mut contexts: Vec<(&str, &str)> = Vec::new();
     for record in records {
         if record.get("type").as_str() == Some("message/context") {
             let data = record.get("data");
-            contexts.push((data.get("messageId").str_or(""), data.get("text").str_or("")));
+            contexts.push((
+                data.get("messageId").str_or(""),
+                data.get("text").str_or(""),
+            ));
         }
     }
     let mut pending: Vec<String> = Vec::new();
     let close_pending = |messages: &mut Vec<Json>, pending: &mut Vec<String>| {
         for id in pending.drain(..) {
-            messages.push(jobj! { "role" => "tool", "tool_call_id" => id, "content" => INTERRUPTED });
+            messages
+                .push(jobj! { "role" => "tool", "tool_call_id" => id, "content" => INTERRUPTED });
         }
     };
     for (index, record) in records.iter().enumerate() {
@@ -366,12 +513,20 @@ pub fn build_messages(system: &str, records: &[Json]) -> Vec<Json> {
                 close_pending(&mut messages, &mut pending);
                 let id = data.get("id").str_or("");
                 let text = data.get("content").str_or("");
-                let attached: Vec<&str> = contexts.iter().filter(|(m, _)| *m == id).map(|(_, t)| *t).collect();
+                let attached: Vec<&str> = contexts
+                    .iter()
+                    .filter(|(m, _)| *m == id)
+                    .map(|(_, t)| *t)
+                    .collect();
                 if attached.is_empty() {
                     messages.push(jobj! { "role" => "user", "content" => text });
                 } else {
                     let mut parts = vec![jobj! { "type" => "text", "text" => text }];
-                    parts.extend(attached.iter().map(|t| jobj! { "type" => "text", "text" => *t }));
+                    parts.extend(
+                        attached
+                            .iter()
+                            .map(|t| jobj! { "type" => "text", "text" => *t }),
+                    );
                     messages.push(jobj! { "role" => "user", "content" => Json::Arr(parts) });
                 }
             }
@@ -383,7 +538,14 @@ pub fn build_messages(system: &str, records: &[Json]) -> Vec<Json> {
                 if calls.is_empty() {
                     message.set("content", text);
                 } else {
-                    message.set("content", if text.is_empty() { Json::Null } else { Json::from(text) });
+                    message.set(
+                        "content",
+                        if text.is_empty() {
+                            Json::Null
+                        } else {
+                            Json::from(text)
+                        },
+                    );
                     message.set(
                         "tool_calls",
                         Json::Arr(
@@ -402,7 +564,10 @@ pub fn build_messages(system: &str, records: &[Json]) -> Vec<Json> {
                                 .collect(),
                         ),
                     );
-                    pending = calls.iter().filter_map(|c| c.get("id").as_str().map(str::to_string)).collect();
+                    pending = calls
+                        .iter()
+                        .filter_map(|c| c.get("id").as_str().map(str::to_string))
+                        .collect();
                 }
                 let current_turn = last_user.is_some_and(|u| index > u);
                 if current_turn && !data.get("reasoningDetails").is_null() {
@@ -415,10 +580,13 @@ pub fn build_messages(system: &str, records: &[Json]) -> Vec<Json> {
                 if let Some(position) = pending.iter().position(|p| p == id) {
                     pending.remove(position);
                     let mut content = data.get("content").str_or("").to_string();
-                    if data.get("isError").as_bool() == Some(true) && !content.starts_with("Error") {
+                    if data.get("isError").as_bool() == Some(true) && !content.starts_with("Error")
+                    {
                         content = format!("Error: {content}");
                     }
-                    messages.push(jobj! { "role" => "tool", "tool_call_id" => id, "content" => content });
+                    messages.push(
+                        jobj! { "role" => "tool", "tool_call_id" => id, "content" => content },
+                    );
                 }
             }
             _ => {}
@@ -440,21 +608,38 @@ pub fn compact(messages: &mut Vec<Json>, budget: usize) {
     if total(messages) <= budget {
         return;
     }
-    let last_user = messages.iter().rposition(|m| m.get("role").as_str() == Some("user")).unwrap_or(0);
+    let last_user = messages
+        .iter()
+        .rposition(|m| m.get("role").as_str() == Some("user"))
+        .unwrap_or(0);
     for index in 0..last_user {
         if total(messages) <= budget {
             return;
         }
         let message = &mut messages[index];
-        if message.get("role").as_str() == Some("tool") && message.get("content").str_or("").len() > 500 {
-            message.set("content", "[older tool output elided by the harness to fit the context window]");
+        if message.get("role").as_str() == Some("tool")
+            && message.get("content").str_or("").len() > 500
+        {
+            message.set(
+                "content",
+                "[older tool output elided by the harness to fit the context window]",
+            );
         }
     }
     while total(messages) > budget {
-        let has_system = messages.first().map(|m| m.get("role").as_str() == Some("system")).unwrap_or(false);
+        let has_system = messages
+            .first()
+            .map(|m| m.get("role").as_str() == Some("system"))
+            .unwrap_or(false);
         let start = usize::from(has_system);
-        let last_user = messages.iter().rposition(|m| m.get("role").as_str() == Some("user")).unwrap_or(0);
-        let next_user = messages[start + 1..].iter().position(|m| m.get("role").as_str() == Some("user")).map(|p| p + start + 1);
+        let last_user = messages
+            .iter()
+            .rposition(|m| m.get("role").as_str() == Some("user"))
+            .unwrap_or(0);
+        let next_user = messages[start + 1..]
+            .iter()
+            .position(|m| m.get("role").as_str() == Some("user"))
+            .map(|p| p + start + 1);
         match next_user {
             Some(end) if end <= last_user && end > start => {
                 messages.drain(start..end);
@@ -476,20 +661,38 @@ mod tests {
     fn rebuilds_interrupted_history_and_context() {
         let records = vec![
             rec("session/created", jobj! { "sessionId" => "s" }),
-            rec("message/user", jobj! { "id" => "u1", "content" => "held turn" }),
-            rec("message/context", jobj! { "messageId" => "u1", "source" => "leviathan", "text" => "recall" }),
+            rec(
+                "message/user",
+                jobj! { "id" => "u1", "content" => "held turn" },
+            ),
+            rec(
+                "message/context",
+                jobj! { "messageId" => "u1", "source" => "leviathan", "text" => "recall" },
+            ),
             rec(
                 "message/assistant",
                 jobj! { "text" => "", "toolCalls" => jarr![jobj! { "id" => "c1", "name" => "x", "arguments" => "{}" }], "reasoningDetails" => jarr![jobj! { "text" => "t" }] },
             ),
-            rec("message/user", jobj! { "id" => "u2", "content" => "recovery-probe" }),
+            rec(
+                "message/user",
+                jobj! { "id" => "u2", "content" => "recovery-probe" },
+            ),
         ];
         let messages = build_messages("sys", &records);
-        let roles: Vec<&str> = messages.iter().map(|m| m.get("role").as_str().unwrap()).collect();
+        let roles: Vec<&str> = messages
+            .iter()
+            .map(|m| m.get("role").as_str().unwrap())
+            .collect();
         assert_eq!(roles, ["system", "user", "assistant", "tool", "user"]);
-        assert_eq!(messages[1].get("content").at(1).get("text").as_str(), Some("recall"));
+        assert_eq!(
+            messages[1].get("content").at(1).get("text").as_str(),
+            Some("recall")
+        );
         assert_eq!(messages[3].get("content").as_str(), Some(INTERRUPTED));
-        assert!(messages[2].get("reasoning_details").is_null(), "old-turn reasoning is not replayed");
+        assert!(
+            messages[2].get("reasoning_details").is_null(),
+            "old-turn reasoning is not replayed"
+        );
     }
 
     #[test]

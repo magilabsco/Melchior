@@ -66,10 +66,14 @@ impl Distribution {
 
     /// A copy of a profile's entries.
     pub fn profile(&self, name: &str) -> Result<Vec<Entry>, String> {
-        self.profiles.iter().find(|(n, _)| n == name).map(|(_, entries)| entries.clone()).ok_or_else(|| {
-            let known: Vec<&str> = self.profiles.iter().map(|(n, _)| n.as_str()).collect();
-            format!("unknown profile {name:?} (available: {})", known.join(", "))
-        })
+        self.profiles
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, entries)| entries.clone())
+            .ok_or_else(|| {
+                let known: Vec<&str> = self.profiles.iter().map(|(n, _)| n.as_str()).collect();
+                format!("unknown profile {name:?} (available: {})", known.join(", "))
+            })
     }
 
     /// Add a profile, or replace one with the same name.

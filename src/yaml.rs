@@ -15,7 +15,10 @@ pub fn parse(text: &str, resolve: &mut TagResolver<'_>) -> Result<Json, String> 
     for (index, raw) in text.split('\n').enumerate() {
         let raw = raw.strip_suffix('\r').unwrap_or(raw);
         if raw.contains('\t') && raw.trim_start_matches(' ').starts_with('\t') {
-            return Err(format!("line {}: tabs are not allowed for indentation", index + 1));
+            return Err(format!(
+                "line {}: tabs are not allowed for indentation",
+                index + 1
+            ));
         }
         let indent = raw.len() - raw.trim_start_matches(' ').len();
         let content = raw[indent..].to_string();
@@ -23,9 +26,18 @@ pub fn parse(text: &str, resolve: &mut TagResolver<'_>) -> Result<Json, String> 
         if index == 0 && content.starts_with("%") {
             return Err("YAML directives are not supported".into());
         }
-        lines.push(Line { indent, text: content, blank, number: index + 1 });
+        lines.push(Line {
+            indent,
+            text: content,
+            blank,
+            number: index + 1,
+        });
     }
-    let mut parser = Parser { lines, pos: 0, resolve };
+    let mut parser = Parser {
+        lines,
+        pos: 0,
+        resolve,
+    };
     parser.skip_blank();
     if parser.pos < parser.lines.len() && parser.lines[parser.pos].text.trim_end() == "---" {
         parser.pos += 1;
@@ -39,7 +51,10 @@ pub fn parse(text: &str, resolve: &mut TagResolver<'_>) -> Result<Json, String> 
     parser.skip_blank();
     if parser.pos < parser.lines.len() {
         let line = &parser.lines[parser.pos];
-        return Err(format!("line {}: unexpected content {:?}", line.number, line.text));
+        return Err(format!(
+            "line {}: unexpected content {:?}",
+            line.number, line.text
+        ));
     }
     Ok(value)
 }
@@ -69,13 +84,19 @@ impl Parser<'_, '_> {
     }
 
     fn err(&self, message: &str) -> String {
-        let number = self.lines.get(self.pos).map(|l| l.number).unwrap_or(self.lines.len());
+        let number = self
+            .lines
+            .get(self.pos)
+            .map(|l| l.number)
+            .unwrap_or(self.lines.len());
         format!("line {number}: {message}")
     }
 
     fn node(&mut self, indent: usize) -> Result<Json, String> {
         self.skip_blank();
-        let Some(line) = self.lines.get(self.pos) else { return Ok(Json::Null) };
+        let Some(line) = self.lines.get(self.pos) else {
+            return Ok(Json::Null);
+        };
         if line.text.starts_with("&") || line.text.starts_with("*") {
             return Err(self.err("anchors and aliases are not supported"));
         }
@@ -94,7 +115,9 @@ impl Parser<'_, '_> {
         let mut items = Vec::new();
         loop {
             self.skip_blank();
-            let Some(line) = self.lines.get(self.pos) else { break };
+            let Some(line) = self.lines.get(self.pos) else {
+                break;
+            };
             if line.indent != indent || !is_seq_item(&line.text) {
                 if line.indent > indent {
                     return Err(self.err("bad indentation in sequence"));
@@ -130,7 +153,9 @@ impl Parser<'_, '_> {
         let mut object = Json::obj();
         loop {
             self.skip_blank();
-            let Some(line) = self.lines.get(self.pos) else { break };
+            let Some(line) = self.lines.get(self.pos) else {
+                break;
+            };
             if line.indent != indent || is_seq_item(&line.text) {
                 if line.indent > indent {
                     return Err(self.err("bad indentation in mapping"));
@@ -141,7 +166,10 @@ impl Parser<'_, '_> {
             let Some((key, value)) = split_key(&text)? else {
                 return Err(self.err("expected 'key: value'"));
             };
-            if object.as_object().is_some_and(|fields| fields.iter().any(|(k, _)| *k == key)) {
+            if object
+                .as_object()
+                .is_some_and(|fields| fields.iter().any(|(k, _)| *k == key))
+            {
                 return Err(self.err(&format!("duplicate key {key:?}")));
             }
             self.pos += 1;
@@ -153,7 +181,9 @@ impl Parser<'_, '_> {
                         let child = next.indent;
                         self.node(child)?
                     }
-                    Some(next) if next.indent == indent && is_seq_item(&next.text) => self.sequence(indent)?,
+                    Some(next) if next.indent == indent && is_seq_item(&next.text) => {
+                        self.sequence(indent)?
+                    }
                     _ => Json::Null,
                 }
             } else if let Some(header) = block_header(value) {
@@ -166,7 +196,11 @@ impl Parser<'_, '_> {
         Ok(object)
     }
 
-    fn block_scalar(&mut self, parent: usize, (folded, chomp): (bool, char)) -> Result<Json, String> {
+    fn block_scalar(
+        &mut self,
+        parent: usize,
+        (folded, chomp): (bool, char),
+    ) -> Result<Json, String> {
         let mut body: Vec<String> = Vec::new();
         let mut block_indent = None;
         while let Some(line) = self.lines.get(self.pos) {
@@ -180,7 +214,11 @@ impl Parser<'_, '_> {
             if line.indent < required || line.indent <= parent {
                 break;
             }
-            body.push(format!("{}{}", " ".repeat(line.indent - required), line.text));
+            body.push(format!(
+                "{}{}",
+                " ".repeat(line.indent - required),
+                line.text
+            ));
             self.pos += 1;
         }
         let trailing = body.iter().rev().take_while(|l| l.is_empty()).count();
@@ -190,7 +228,11 @@ impl Parser<'_, '_> {
             let mut out = String::new();
             for (i, line) in content.iter().enumerate() {
                 if i > 0 {
-                    out.push(if line.is_empty() || content[i - 1].is_empty() { '\n' } else { ' ' });
+                    out.push(if line.is_empty() || content[i - 1].is_empty() {
+                        '\n'
+                    } else {
+                        ' '
+                    });
                 }
                 out.push_str(line);
             }
@@ -237,9 +279,15 @@ impl Parser<'_, '_> {
         } else if rest.starts_with('"') || rest.starts_with('\'') {
             let s = cursor.quoted().map_err(|e| self.err(&e))?;
             cursor.trailing().map_err(|e| self.err(&e))?;
-            Scalar { text: s, quoted: true }
+            Scalar {
+                text: s,
+                quoted: true,
+            }
         } else {
-            Scalar { text: strip_comment(rest).to_string(), quoted: false }
+            Scalar {
+                text: strip_comment(rest).to_string(),
+                quoted: false,
+            }
         };
         match tag {
             None => Ok(resolve_plain(value)),
@@ -266,18 +314,24 @@ fn resolve_plain(value: Scalar) -> Json {
         _ => {}
     }
     let numeric = t.trim_start_matches(['-', '+']);
-    if !numeric.is_empty() && numeric.bytes().all(|b| b.is_ascii_digit() || b == b'_')
-        && let Ok(i) = t.replace('_', "").parse::<i64>() {
-            return Json::Int(i);
-        }
+    if !numeric.is_empty()
+        && numeric.bytes().all(|b| b.is_ascii_digit() || b == b'_')
+        && let Ok(i) = t.replace('_', "").parse::<i64>()
+    {
+        return Json::Int(i);
+    }
     if let Some(hex) = t.strip_prefix("0x")
-        && let Ok(i) = i64::from_str_radix(hex, 16) {
-            return Json::Int(i);
-        }
-    if t.bytes().any(|b| b.is_ascii_digit()) && t.bytes().all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b))
-        && let Ok(f) = t.parse::<f64>() {
-            return Json::Float(f);
-        }
+        && let Ok(i) = i64::from_str_radix(hex, 16)
+    {
+        return Json::Int(i);
+    }
+    if t.bytes().any(|b| b.is_ascii_digit())
+        && t.bytes()
+            .all(|b| b.is_ascii_digit() || b"+-.eE".contains(&b))
+        && let Ok(f) = t.parse::<f64>()
+    {
+        return Json::Float(f);
+    }
     Json::Str(t.to_string())
 }
 
@@ -315,9 +369,10 @@ fn split_key(text: &str) -> Result<Option<(String, String)>, String> {
         let rest = &text[cursor.pos..];
         let rest_trim = rest.trim_start();
         if let Some(after) = rest_trim.strip_prefix(':')
-            && (after.is_empty() || after.starts_with(' ')) {
-                return Ok(Some((key, after.to_string())));
-            }
+            && (after.is_empty() || after.starts_with(' '))
+        {
+            return Ok(Some((key, after.to_string())));
+        }
         return Ok(None);
     }
     if text.starts_with('[') || text.starts_with('{') || text.starts_with('!') {
@@ -376,7 +431,9 @@ impl Cursor<'_> {
         let quote = self.bump().ok_or("expected quote")?;
         let mut out = String::new();
         loop {
-            let c = self.bump().ok_or("unterminated quoted string (multi-line quoted scalars are not supported)")?;
+            let c = self.bump().ok_or(
+                "unterminated quoted string (multi-line quoted scalars are not supported)",
+            )?;
             if c == quote {
                 if quote == '\'' && self.peek() == Some('\'') {
                     self.pos += 1;
@@ -470,7 +527,10 @@ impl Cursor<'_> {
             Some('"' | '\'') => Ok(Json::Str(self.quoted()?)),
             _ => {
                 let text = self.plain(&[',', ']', '}'])?;
-                Ok(resolve_plain(Scalar { text, quoted: false }))
+                Ok(resolve_plain(Scalar {
+                    text,
+                    quoted: false,
+                }))
             }
         }
     }
@@ -521,8 +581,14 @@ mod tests {
         assert_eq!(value.at(0).get("id").as_str(), Some("system-prompt"));
         assert_eq!(value.at(1).get("disabled").as_bool(), Some(true));
         let inserted = value.at(2).get("insert").at(0);
-        assert_eq!(inserted.get("name").as_str(), Some("@deepseek-ai/dsh-mcp-client"));
-        assert_eq!(inserted.get("config").get("url").as_str(), Some("http://127.0.0.1:8000/v1/agents/a%20b/mcp"));
+        assert_eq!(
+            inserted.get("name").as_str(),
+            Some("@deepseek-ai/dsh-mcp-client")
+        );
+        assert_eq!(
+            inserted.get("config").get("url").as_str(),
+            Some("http://127.0.0.1:8000/v1/agents/a%20b/mcp")
+        );
         assert_eq!(seen[1].1, "`Bearer ${process.env.GATEWAY_TOKEN}`");
     }
 

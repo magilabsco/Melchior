@@ -20,7 +20,10 @@ pub struct HttpError {
 
 impl HttpError {
     fn new(message: impl Into<String>, retryable: bool) -> HttpError {
-        HttpError { message: message.into(), retryable }
+        HttpError {
+            message: message.into(),
+            retryable,
+        }
     }
 }
 
@@ -63,7 +66,8 @@ impl Request {
 
     pub fn json(mut self, body: &crate::json::Json) -> Request {
         self.body = body.to_string().into_bytes();
-        self.headers.push(("Content-Type".into(), "application/json".into()));
+        self.headers
+            .push(("Content-Type".into(), "application/json".into()));
         self
     }
 
@@ -82,7 +86,10 @@ pub struct Response {
 
 impl Response {
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn text(mut self, limit: usize) -> Result<String, HttpError> {
@@ -108,35 +115,61 @@ fn parse_url(url: &str) -> Result<Url, HttpError> {
     } else if let Some(rest) = url.strip_prefix("http://") {
         (false, rest)
     } else {
-        return Err(HttpError::new(format!("unsupported URL scheme in {url:?}"), false));
+        return Err(HttpError::new(
+            format!("unsupported URL scheme in {url:?}"),
+            false,
+        ));
     };
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
     if authority.contains('@') {
-        return Err(HttpError::new("URLs with embedded credentials are not supported", false));
+        return Err(HttpError::new(
+            "URLs with embedded credentials are not supported",
+            false,
+        ));
     }
     let default_port = if https { 443 } else { 80 };
     let (host, port) = if let Some(stripped) = authority.strip_prefix('[') {
-        let end = stripped.find(']').ok_or_else(|| HttpError::new("bad IPv6 host", false))?;
+        let end = stripped
+            .find(']')
+            .ok_or_else(|| HttpError::new("bad IPv6 host", false))?;
         let host = &stripped[..end];
-        let port = stripped[end + 1..].strip_prefix(':').map(|p| p.parse::<u16>());
-        (host.to_string(), port.transpose().map_err(|_| HttpError::new("bad port", false))?.unwrap_or(default_port))
+        let port = stripped[end + 1..]
+            .strip_prefix(':')
+            .map(|p| p.parse::<u16>());
+        (
+            host.to_string(),
+            port.transpose()
+                .map_err(|_| HttpError::new("bad port", false))?
+                .unwrap_or(default_port),
+        )
     } else {
         match authority.rsplit_once(':') {
-            Some((h, p)) => (h.to_string(), p.parse().map_err(|_| HttpError::new("bad port", false))?),
+            Some((h, p)) => (
+                h.to_string(),
+                p.parse().map_err(|_| HttpError::new("bad port", false))?,
+            ),
             None => (authority.to_string(), default_port),
         }
     };
     if host.is_empty() {
         return Err(HttpError::new("URL has no host", false));
     }
-    Ok(Url { https, host, port, path: path.to_string() })
+    Ok(Url {
+        https,
+        host,
+        port,
+        path: path.to_string(),
+    })
 }
 
 fn check_header(name: &str, value: &str) -> Result<(), HttpError> {
-    if name.is_empty() || name.contains([':', '\r', '\n', '\0']) || value.contains(['\r', '\n', '\0']) {
+    if name.is_empty()
+        || name.contains([':', '\r', '\n', '\0'])
+        || value.contains(['\r', '\n', '\0'])
+    {
         return Err(HttpError::new(format!("invalid header {name:?}"), false));
     }
     Ok(())
@@ -147,7 +180,11 @@ pub fn send(request: &Request) -> Result<Response, HttpError> {
         check_header(name, value)?;
     }
     let url = parse_url(&request.url)?;
-    if url.https { send_curl(request) } else { send_plain(request, &url) }
+    if url.https {
+        send_curl(request)
+    } else {
+        send_plain(request, &url)
+    }
 }
 
 fn send_plain(request: &Request, url: &Url) -> Result<Response, HttpError> {
@@ -168,7 +205,12 @@ fn send_plain(request: &Request, url: &Url) -> Result<Response, HttpError> {
     }
     let stream = stream.ok_or_else(|| {
         HttpError::new(
-            format!("cannot connect to {}:{}: {}", url.host, url.port, last_error.map(|e| e.to_string()).unwrap_or_default()),
+            format!(
+                "cannot connect to {}:{}: {}",
+                url.host,
+                url.port,
+                last_error.map(|e| e.to_string()).unwrap_or_default()
+            ),
             true,
         )
     })?;
@@ -197,7 +239,9 @@ fn send_plain(request: &Request, url: &Url) -> Result<Response, HttpError> {
         head.push_str(&format!("Content-Length: {}\r\n", request.body.len()));
     }
     head.push_str("\r\n");
-    let mut writer = stream.try_clone().map_err(|e| HttpError::new(e.to_string(), true))?;
+    let mut writer = stream
+        .try_clone()
+        .map_err(|e| HttpError::new(e.to_string(), true))?;
     writer
         .write_all(head.as_bytes())
         .and_then(|_| writer.write_all(&request.body))
@@ -205,21 +249,29 @@ fn send_plain(request: &Request, url: &Url) -> Result<Response, HttpError> {
         .map_err(|e| HttpError::new(format!("sending request failed: {e}"), true))?;
     let mut reader = BufReader::new(stream);
     let (status, headers) = read_head(&mut reader)?;
-    let chunked = headers
-        .iter()
-        .any(|(k, v)| k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked"));
+    let chunked = headers.iter().any(|(k, v)| {
+        k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked")
+    });
     let length = headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         .and_then(|(_, v)| v.trim().parse::<u64>().ok());
     let body: Box<dyn BufRead + Send> = if chunked {
-        Box::new(BufReader::new(Chunked { inner: reader, remaining: 0, done: false }))
+        Box::new(BufReader::new(Chunked {
+            inner: reader,
+            remaining: 0,
+            done: false,
+        }))
     } else if let Some(length) = length {
         Box::new(BufReader::new(reader.take(length)))
     } else {
         Box::new(reader)
     };
-    Ok(Response { status, headers, body })
+    Ok(Response {
+        status,
+        headers,
+        body,
+    })
 }
 
 fn read_line(reader: &mut dyn BufRead) -> Result<String, HttpError> {
@@ -229,7 +281,10 @@ fn read_line(reader: &mut dyn BufRead) -> Result<String, HttpError> {
         .read_line(&mut line)
         .map_err(|e| HttpError::new(format!("reading response failed: {e}"), true))?;
     if n == 0 {
-        return Err(HttpError::new("connection closed before a response was received", true));
+        return Err(HttpError::new(
+            "connection closed before a response was received",
+            true,
+        ));
     }
     Ok(line.trim_end_matches(['\r', '\n']).to_string())
 }
@@ -244,10 +299,15 @@ fn read_head(reader: &mut dyn BufRead) -> Result<(u16, Vec<(String, String)>), H
         let mut parts = status_line.splitn(3, ' ');
         let version = parts.next().unwrap_or_default();
         if !version.starts_with("HTTP/") {
-            return Err(HttpError::new(format!("malformed status line {status_line:?}"), true));
+            return Err(HttpError::new(
+                format!("malformed status line {status_line:?}"),
+                true,
+            ));
         }
-        let status: u16 =
-            parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| HttpError::new("malformed status code", true))?;
+        let status: u16 = parts
+            .next()
+            .and_then(|s| s.parse().ok())
+            .ok_or_else(|| HttpError::new("malformed status code", true))?;
         let reason = parts.next().unwrap_or_default().to_ascii_lowercase();
         let mut headers = Vec::new();
         loop {
@@ -259,7 +319,9 @@ fn read_head(reader: &mut dyn BufRead) -> Result<(u16, Vec<(String, String)>), H
                 headers.push((name.trim().to_string(), value.trim().to_string()));
             }
         }
-        if (100..200).contains(&status) || (status == 200 && reason.contains("connection established")) {
+        if (100..200).contains(&status)
+            || (status == 200 && reason.contains("connection established"))
+        {
             continue;
         }
         return Ok((status, headers));
@@ -282,7 +344,10 @@ impl<R: BufRead> Read for Chunked<R> {
             self.inner.read_line(&mut line)?;
             let size = line.trim().split(';').next().unwrap_or("").trim();
             if size.is_empty() {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "truncated chunked body"));
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "truncated chunked body",
+                ));
             }
             self.remaining = u64::from_str_radix(size, 16)
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "bad chunk size"))?;
@@ -300,7 +365,10 @@ impl<R: BufRead> Read for Chunked<R> {
         let want = buf.len().min(self.remaining as usize);
         let n = self.inner.read(&mut buf[..want])?;
         if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "truncated chunk"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "truncated chunk",
+            ));
         }
         self.remaining -= n as u64;
         if self.remaining == 0 {
@@ -315,9 +383,15 @@ impl<R: BufRead> Read for Chunked<R> {
 
 fn curl_quote(value: &str) -> Result<String, HttpError> {
     if value.contains(['\n', '\r', '\0']) {
-        return Err(HttpError::new("curl config values cannot contain line breaks", false));
+        return Err(HttpError::new(
+            "curl config values cannot contain line breaks",
+            false,
+        ));
     }
-    Ok(format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+    Ok(format!(
+        "\"{}\"",
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
 }
 
 fn curl_binary() -> String {
@@ -363,7 +437,9 @@ impl Read for CurlBody {
             let status = self.guard.child.lock().unwrap().wait()?;
             if !status.success() {
                 let detail = self.guard.stderr.lock().unwrap().trim().to_string();
-                return Err(io::Error::other(format!("curl failed ({status}): {detail}")));
+                return Err(io::Error::other(format!(
+                    "curl failed ({status}): {detail}"
+                )));
             }
         }
         Ok(n)
@@ -375,17 +451,38 @@ fn send_curl(request: &Request) -> Result<Response, HttpError> {
     config.push_str(&format!("url = {}\n", curl_quote(&request.url)?));
     config.push_str(&format!("request = {}\n", curl_quote(&request.method)?));
     for (name, value) in &request.headers {
-        config.push_str(&format!("header = {}\n", curl_quote(&format!("{name}: {value}"))?));
+        config.push_str(&format!(
+            "header = {}\n",
+            curl_quote(&format!("{name}: {value}"))?
+        ));
     }
-    config.push_str(&format!("header = {}\n", curl_quote(&format!("User-Agent: melchior/{}", env!("CARGO_PKG_VERSION")))?));
-    config.push_str(&format!("connect-timeout = {}\n", request.connect_timeout.as_secs().max(1)));
-    config.push_str(&format!("max-time = {}\n", request.total_timeout.as_secs().max(1)));
-    config.push_str(&format!("speed-time = {}\nspeed-limit = 1\n", request.read_timeout.as_secs().max(1)));
+    config.push_str(&format!(
+        "header = {}\n",
+        curl_quote(&format!(
+            "User-Agent: melchior/{}",
+            env!("CARGO_PKG_VERSION")
+        ))?
+    ));
+    config.push_str(&format!(
+        "connect-timeout = {}\n",
+        request.connect_timeout.as_secs().max(1)
+    ));
+    config.push_str(&format!(
+        "max-time = {}\n",
+        request.total_timeout.as_secs().max(1)
+    ));
+    config.push_str(&format!(
+        "speed-time = {}\nspeed-limit = 1\n",
+        request.read_timeout.as_secs().max(1)
+    ));
     let mut body_file = None;
     if !request.body.is_empty() || request.method != "GET" {
         let dir = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".into());
-        let path = std::path::PathBuf::from(dir)
-            .join(format!("melchior-{}-{}.body", std::process::id(), crate::util::random_hex(8)));
+        let path = std::path::PathBuf::from(dir).join(format!(
+            "melchior-{}-{}.body",
+            std::process::id(),
+            crate::util::random_hex(8)
+        ));
         use std::os::unix::fs::OpenOptionsExt;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -393,16 +490,29 @@ fn send_curl(request: &Request) -> Result<Response, HttpError> {
             .mode(0o600)
             .open(&path)
             .map_err(|e| HttpError::new(format!("cannot stage request body: {e}"), false))?;
-        file.write_all(&request.body).map_err(|e| HttpError::new(format!("cannot stage request body: {e}"), false))?;
-        config.push_str(&format!("data-binary = {}\n", curl_quote(&format!("@{}", path.display()))?));
+        file.write_all(&request.body)
+            .map_err(|e| HttpError::new(format!("cannot stage request body: {e}"), false))?;
+        config.push_str(&format!(
+            "data-binary = {}\n",
+            curl_quote(&format!("@{}", path.display()))?
+        ));
         body_file = Some(path);
     }
     let spawned = Command::new(curl_binary())
-        .args(["--silent", "--show-error", "--no-buffer", "--include", "--config", "-"])
+        .args([
+            "--silent",
+            "--show-error",
+            "--no-buffer",
+            "--include",
+            "--config",
+            "-",
+        ])
         .env_clear()
         .envs(std::env::vars().filter(|(k, _)| {
-            matches!(k.as_str(), "PATH" | "HOME" | "SSL_CERT_FILE" | "SSL_CERT_DIR" | "CURL_CA_BUNDLE")
-                || k.ends_with("_proxy")
+            matches!(
+                k.as_str(),
+                "PATH" | "HOME" | "SSL_CERT_FILE" | "SSL_CERT_DIR" | "CURL_CA_BUNDLE"
+            ) || k.ends_with("_proxy")
                 || k.ends_with("_PROXY")
         }))
         .stdin(Stdio::piped())
@@ -415,7 +525,10 @@ fn send_curl(request: &Request) -> Result<Response, HttpError> {
             if let Some(path) = &body_file {
                 let _ = std::fs::remove_file(path);
             }
-            return Err(HttpError::new(format!("https requires curl, which could not be started: {e}"), false));
+            return Err(HttpError::new(
+                format!("https requires curl, which could not be started: {e}"),
+                false,
+            ));
         }
     };
     let mut stdin = child.stdin.take().expect("piped stdin");
@@ -428,12 +541,25 @@ fn send_curl(request: &Request) -> Result<Response, HttpError> {
         let _ = (&mut stderr_pipe).take(16 * 1024).read_to_string(&mut buf);
         *sink.lock().unwrap() = buf;
     });
-    let guard = CurlGuard { child: crate::proc::track(child), body_file, stderr: stderr.clone() };
-    stdin.write_all(config.as_bytes()).map_err(|e| HttpError::new(format!("cannot configure curl: {e}"), false))?;
+    let guard = CurlGuard {
+        child: crate::proc::track(child),
+        body_file,
+        stderr: stderr.clone(),
+    };
+    stdin
+        .write_all(config.as_bytes())
+        .map_err(|e| HttpError::new(format!("cannot configure curl: {e}"), false))?;
     drop(stdin);
-    let mut body = CurlBody { stdout: BufReader::new(stdout), guard };
+    let mut body = CurlBody {
+        stdout: BufReader::new(stdout),
+        guard,
+    };
     match read_head(&mut body.stdout) {
-        Ok((status, headers)) => Ok(Response { status, headers, body: Box::new(BufReader::new(body)) }),
+        Ok((status, headers)) => Ok(Response {
+            status,
+            headers,
+            body: Box::new(BufReader::new(body)),
+        }),
         Err(_) => {
             let status = body.guard.child.lock().unwrap().wait().ok();
             std::thread::sleep(Duration::from_millis(20));
@@ -441,7 +567,10 @@ fn send_curl(request: &Request) -> Result<Response, HttpError> {
             let code = status.and_then(|s| s.code()).unwrap_or(-1);
             // 6 resolve, 7 connect, 28 timeout, 35 TLS handshake, 52 empty reply, 55/56 send/recv.
             let retryable = matches!(code, 6 | 7 | 28 | 35 | 52 | 55 | 56);
-            Err(HttpError::new(format!("https request failed (curl exit {code}): {detail}"), retryable))
+            Err(HttpError::new(
+                format!("https request failed (curl exit {code}): {detail}"),
+                retryable,
+            ))
         }
     }
 }
@@ -454,7 +583,10 @@ mod tests {
     #[test]
     fn parses_urls() {
         let url = parse_url("http://127.0.0.1:8000/v1/agents/a%20b/mcp").unwrap();
-        assert_eq!((url.host.as_str(), url.port, url.path.as_str()), ("127.0.0.1", 8000, "/v1/agents/a%20b/mcp"));
+        assert_eq!(
+            (url.host.as_str(), url.port, url.path.as_str()),
+            ("127.0.0.1", 8000, "/v1/agents/a%20b/mcp")
+        );
         let url = parse_url("https://openrouter.ai/api/v1").unwrap();
         assert!(url.https && url.port == 443);
         assert!(parse_url("ftp://x").is_err());

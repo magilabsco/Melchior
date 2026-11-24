@@ -24,7 +24,10 @@ impl Tool for ExitPlanMode {
         if plan.trim().is_empty() {
             return ToolOutput::err("plan must not be empty");
         }
-        if let Err(e) = cx.session.set_state("plan", jobj! { "plan" => plan, "recordedAt" => util::now_iso() }) {
+        if let Err(e) = cx.session.set_state(
+            "plan",
+            jobj! { "plan" => plan, "recordedAt" => util::now_iso() },
+        ) {
             return ToolOutput::err(e);
         }
         ToolOutput::ok("Plan recorded. Carry it out from the next step.")

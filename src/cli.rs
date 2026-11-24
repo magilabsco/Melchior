@@ -43,14 +43,28 @@ fn usage(name: &str) -> String {
 }
 
 fn parse_args(dist: &Distribution) -> Result<Option<Args>, String> {
-    let mut args = Args { profile: None, serve: false, patches: Vec::new(), index: None, memory: None, task: Vec::new() };
+    let mut args = Args {
+        profile: None,
+        serve: false,
+        patches: Vec::new(),
+        index: None,
+        memory: None,
+        task: Vec::new(),
+    };
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
         let (flag, inline) = match arg.split_once('=') {
-            Some((flag, value)) if flag.starts_with("--") => (flag.to_string(), Some(value.to_string())),
+            Some((flag, value)) if flag.starts_with("--") => {
+                (flag.to_string(), Some(value.to_string()))
+            }
             _ => (arg.clone(), None),
         };
-        let mut value = |what: &str| inline.clone().or_else(|| iter.next()).ok_or(format!("{flag} needs {what}"));
+        let mut value = |what: &str| {
+            inline
+                .clone()
+                .or_else(|| iter.next())
+                .ok_or(format!("{flag} needs {what}"))
+        };
         match flag.as_str() {
             "--version" | "-V" => {
                 println!("{} {}", dist.name, dist.version);
@@ -65,7 +79,9 @@ fn parse_args(dist: &Distribution) -> Result<Option<Args>, String> {
             "--patch" => args.patches.push(PathBuf::from(value("a file")?)),
             "--index" => args.index = Some(value("a file")?),
             "--memory" => args.memory = Some(value("a file")?),
-            other if other.starts_with("--") => return Err(format!("unknown option {other}\n{}", usage(&dist.name))),
+            other if other.starts_with("--") => {
+                return Err(format!("unknown option {other}\n{}", usage(&dist.name)));
+            }
             _ => args.task.push(arg),
         }
     }
@@ -85,7 +101,10 @@ pub fn main(dist: Distribution) -> ExitCode {
     };
     // DeepSeek Harness serves JSON-RPC when launched with `--profile sdk`.
     let serve = args.serve || (args.task.is_empty() && args.profile.as_deref() == Some("sdk"));
-    let profile = args.profile.clone().unwrap_or_else(|| dist.default_profile.clone());
+    let profile = args
+        .profile
+        .clone()
+        .unwrap_or_else(|| dist.default_profile.clone());
     let dist = Arc::new(dist);
     if serve {
         return serve_stdio(dist, &profile, &args);
@@ -95,7 +114,9 @@ pub fn main(dist: Distribution) -> ExitCode {
 
 /// Point the `leviathan` entry at the files given on the command line.
 fn apply_leviathan_flags(entries: &mut [Entry], args: &Args) {
-    let Some(entry) = entries.iter_mut().find(|e| e.id == "leviathan") else { return };
+    let Some(entry) = entries.iter_mut().find(|e| e.id == "leviathan") else {
+        return;
+    };
     if let Some(index) = &args.index {
         entry.config.set("index", index.as_str());
     }
@@ -105,10 +126,12 @@ fn apply_leviathan_flags(entries: &mut [Entry], args: &Args) {
 }
 
 fn serve_stdio(dist: Arc<Distribution>, profile: &str, args: &Args) -> ExitCode {
-    let entries = plugins::build_entries(&dist, profile, None, &args.patches).map(|(mut entries, warnings)| {
-        apply_leviathan_flags(&mut entries, args);
-        (entries, warnings)
-    });
+    let entries = plugins::build_entries(&dist, profile, None, &args.patches).map(
+        |(mut entries, warnings)| {
+            apply_leviathan_flags(&mut entries, args);
+            (entries, warnings)
+        },
+    );
     if let Err(e) = &entries {
         // Report it on stderr now and as the initialize error later, so the
         // SDK client shows it either way.
@@ -127,10 +150,15 @@ fn headless(dist: Arc<Distribution>, profile: &str, args: &Args) -> ExitCode {
         return ExitCode::from(2);
     }
     let home = server::env_home()
-        .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(&dist.home_dir_name)))
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(&dist.home_dir_name))
+        })
         .unwrap_or_else(|| PathBuf::from(&dist.home_dir_name));
     let provider = std::env::var("MELCHIOR_PROVIDER").unwrap_or_else(|_| "openrouter".into());
-    let model = std::env::var("MELCHIOR_MODEL").unwrap_or_else(|_| "deepseek/deepseek-chat-v3.1".into());
+    let model =
+        std::env::var("MELCHIOR_MODEL").unwrap_or_else(|_| "deepseek/deepseek-chat-v3.1".into());
 
     let entries = dist.profile(profile).and_then(|mut entries| {
         if let Some(llm) = entries.iter_mut().find(|e| e.id == "llm-pi-ai") {
@@ -141,7 +169,8 @@ fn headless(dist: Arc<Distribution>, profile: &str, args: &Args) -> ExitCode {
             config.deep_merge(&llm.config);
             llm.config = config;
         }
-        let (mut patched, warnings) = plugins::build_entries(&dist, profile, Some(&home), &args.patches)?;
+        let (mut patched, warnings) =
+            plugins::build_entries(&dist, profile, Some(&home), &args.patches)?;
         for warning in warnings {
             eprintln!("{name}: {warning}");
         }
@@ -167,17 +196,36 @@ fn headless(dist: Arc<Distribution>, profile: &str, args: &Args) -> ExitCode {
     };
 
     let notifier = Arc::new(Notifier::with_sink(|line| {
-        let Ok(message) = json::parse(line) else { return };
+        let Ok(message) = json::parse(line) else {
+            return;
+        };
         let event = message.get("params").get("event");
         match event.get("type").as_str() {
-            Some("tool/call") => eprintln!("· {} {}", event.get("data").get("name").str_or("?"), util::truncate(event.get("data").get("arguments").str_or(""), 160, "…")),
-            Some("context/added") => eprintln!("· context from {}", event.get("data").get("source").str_or("?")),
-            Some("assistant/retry") => eprintln!("· retrying: {}", event.get("data").get("error").str_or("")),
+            Some("tool/call") => eprintln!(
+                "· {} {}",
+                event.get("data").get("name").str_or("?"),
+                util::truncate(event.get("data").get("arguments").str_or(""), 160, "…")
+            ),
+            Some("context/added") => eprintln!(
+                "· context from {}",
+                event.get("data").get("source").str_or("?")
+            ),
+            Some("assistant/retry") => {
+                eprintln!("· retrying: {}", event.get("data").get("error").str_or(""))
+            }
             _ => {}
         }
     }));
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let runtime = Arc::new(Runtime::new(cwd, home.clone(), provider, model, None, None, notifier));
+    let runtime = Arc::new(Runtime::new(
+        cwd,
+        home.clone(),
+        provider,
+        model,
+        None,
+        None,
+        notifier,
+    ));
     let (app, report) = match server::boot(&dist, runtime, &home, &entries) {
         Ok(booted) => booted,
         Err(e) => {
@@ -194,5 +242,9 @@ fn headless(dist: Arc<Distribution>, profile: &str, args: &Args) -> ExitCode {
     println!("{}", outcome.text);
     app.dispose_all();
     crate::proc::kill_all();
-    if outcome.reason == "error" { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+    if outcome.reason == "error" {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }

@@ -50,7 +50,18 @@ const CONFIG_JSON: &[&str] = &[
     "lerna.json",
     "nx.json",
 ];
-const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".venv", "venv", "__pycache__", ".melchior", ".leviathan", "dist", "build"];
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".melchior",
+    ".leviathan",
+    "dist",
+    "build",
+];
 const MAX_DEPTH: usize = 6;
 /// Directory entries looked at, and data files indexed, at most.
 const MAX_ENTRIES: usize = 20_000;
@@ -77,22 +88,31 @@ pub struct Outcome {
 
 fn is_sqlite(path: &Path) -> bool {
     let mut head = [0u8; 16];
-    fs::File::open(path).and_then(|mut f| f.read_exact(&mut head)).is_ok() && &head == b"SQLite format 3\0"
+    fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok()
+        && &head == b"SQLite format 3\0"
 }
 
 /// A small JSON file holds records when it is an array, or wraps an array
 /// of objects (`{"data": {"items": [...]}}`); a config file does neither.
 fn holds_records(path: &Path) -> bool {
-    let Ok(text) = fs::read_to_string(path) else { return false };
+    let Ok(text) = fs::read_to_string(path) else {
+        return false;
+    };
     fn wraps_records(value: &Json, depth: usize) -> bool {
         match value {
             Json::Arr(items) => items.iter().filter(|v| matches!(v, Json::Obj(_))).count() >= 2,
-            Json::Obj(fields) if depth < 3 => fields.iter().any(|(_, v)| wraps_records(v, depth + 1)),
+            Json::Obj(fields) if depth < 3 => {
+                fields.iter().any(|(_, v)| wraps_records(v, depth + 1))
+            }
             _ => false,
         }
     }
     match json::parse(text.trim_start_matches('\u{feff}')) {
-        Ok(Json::Arr(items)) => items.iter().any(|v| matches!(v, Json::Obj(_) | Json::Arr(_))),
+        Ok(Json::Arr(items)) => items
+            .iter()
+            .any(|v| matches!(v, Json::Obj(_) | Json::Arr(_))),
         Ok(doc @ Json::Obj(_)) => wraps_records(&doc, 0),
         _ => false,
     }
@@ -104,7 +124,10 @@ fn is_data(path: &Path, bytes: u64, json_min_bytes: u64) -> bool {
     if bytes == 0 {
         return false;
     }
-    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
     let (base, gz) = match name.strip_suffix(".gz") {
         Some(base) => (base, true),
         None => (name.as_str(), false),
@@ -117,7 +140,11 @@ fn is_data(path: &Path, bytes: u64, json_min_bytes: u64) -> bool {
         return !gz && is_sqlite(path);
     }
     if ext == "json" {
-        if CONFIG_JSON.contains(&base) || base.ends_with("-lock.json") || base.ends_with(".lock.json") || base.starts_with("tsconfig.") {
+        if CONFIG_JSON.contains(&base)
+            || base.ends_with("-lock.json")
+            || base.ends_with(".lock.json")
+            || base.starts_with("tsconfig.")
+        {
             return false;
         }
         return gz || bytes >= json_min_bytes || holds_records(path);
@@ -128,12 +155,16 @@ fn is_data(path: &Path, bytes: u64, json_min_bytes: u64) -> bool {
 /// Data files under `root`, largest first. Symlinks are not followed and
 /// every file must resolve inside `root`, as for the file tools.
 pub fn scan(root: &Path, json_min_bytes: u64, exclude: &[PathBuf]) -> Vec<DataFile> {
-    let Ok(canonical_root) = root.canonicalize() else { return Vec::new() };
+    let Ok(canonical_root) = root.canonicalize() else {
+        return Vec::new();
+    };
     let mut found = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut seen = 0usize;
     while let Some((dir, depth)) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             seen += 1;
             if seen > MAX_ENTRIES {
@@ -154,9 +185,14 @@ pub fn scan(root: &Path, json_min_bytes: u64, exclude: &[PathBuf]) -> Vec<DataFi
                 }
                 continue;
             }
-            let inside = path.canonicalize().is_ok_and(|p| p.starts_with(&canonical_root));
+            let inside = path
+                .canonicalize()
+                .is_ok_and(|p| p.starts_with(&canonical_root));
             if meta.is_file() && inside && is_data(&path, meta.len(), json_min_bytes) {
-                found.push(DataFile { path, bytes: meta.len() });
+                found.push(DataFile {
+                    path,
+                    bytes: meta.len(),
+                });
             }
         }
     }
@@ -232,21 +268,41 @@ impl AutoIndex {
             && text.contains("tables (")
             && files.iter().any(|f| is_sqlite(&f.path))
         {
-            log_warn!("leviathan", "this Leviathan cannot index every SQLite table; indexing the other files");
+            log_warn!(
+                "leviathan",
+                "this Leviathan cannot index every SQLite table; indexing the other files"
+            );
             files.retain(|f| !is_sqlite(&f.path));
-            result = if files.is_empty() { Err(text.clone()) } else { self.build(runtime, &files) };
+            result = if files.is_empty() {
+                Err(text.clone())
+            } else {
+                self.build(runtime, &files)
+            };
         }
-        let mut outcome = Outcome { indexed: files.clone(), left_out, ..Outcome::default() };
+        let mut outcome = Outcome {
+            indexed: files.clone(),
+            left_out,
+            ..Outcome::default()
+        };
         match result {
             Ok((true, text)) => {
                 outcome.seconds = started.elapsed().as_secs_f64();
-                let report = text.lines().rev().find_map(|l| json::parse(l.trim()).ok()).unwrap_or(Json::Null);
+                let report = text
+                    .lines()
+                    .rev()
+                    .find_map(|l| json::parse(l.trim()).ok())
+                    .unwrap_or(Json::Null);
                 outcome.records = report.get("record_count").as_i64().unwrap_or(0);
                 outcome.kinds = report
                     .get("kinds")
                     .items()
                     .iter()
-                    .map(|k| (k.get("name").str_or("?").to_string(), k.get("records").as_i64().unwrap_or(0)))
+                    .map(|k| {
+                        (
+                            k.get("name").str_or("?").to_string(),
+                            k.get("records").as_i64().unwrap_or(0),
+                        )
+                    })
                     .collect();
                 self.leviathan.invalidate();
                 if let Err(e) = self.backend.connect() {
@@ -278,7 +334,13 @@ impl AutoIndex {
     fn build(&self, runtime: &Runtime, files: &[DataFile]) -> Result<(bool, String), String> {
         let mut command = Command::new(&self.bin);
         // Options first, then `--`: a file name is never read as a flag.
-        command.arg("--json").arg("index").arg("--index").arg(&self.index).arg("--quiet").arg("--");
+        command
+            .arg("--json")
+            .arg("index")
+            .arg("--index")
+            .arg(&self.index)
+            .arg("--quiet")
+            .arg("--");
         for f in files {
             command.arg(&f.path);
         }
@@ -295,7 +357,13 @@ impl AutoIndex {
     /// One line for the briefing, if anything happened.
     pub fn note(&self, cwd: &Path) -> Option<String> {
         let outcome = self.outcome.lock().unwrap().clone()?;
-        let rel = |f: &DataFile| f.path.strip_prefix(cwd).unwrap_or(&f.path).display().to_string();
+        let rel = |f: &DataFile| {
+            f.path
+                .strip_prefix(cwd)
+                .unwrap_or(&f.path)
+                .display()
+                .to_string()
+        };
         let mut out = String::new();
         if !outcome.indexed.is_empty() {
             let mut names: Vec<String> = outcome.indexed.iter().take(8).map(rel).collect();
@@ -308,13 +376,24 @@ impl AutoIndex {
                 names.join(", ")
             ));
             if !outcome.kinds.is_empty() {
-                let kinds: Vec<String> = outcome.kinds.iter().map(|(k, n)| format!("{k} ({n})")).collect();
-                out.push_str(&format!(" It holds {} kinds of record: {}.", kinds.len(), kinds.join(", ")));
+                let kinds: Vec<String> = outcome
+                    .kinds
+                    .iter()
+                    .map(|(k, n)| format!("{k} ({n})"))
+                    .collect();
+                out.push_str(&format!(
+                    " It holds {} kinds of record: {}.",
+                    kinds.len(),
+                    kinds.join(", ")
+                ));
             }
             out.push_str(" Re-index with leviathan_index to set fields such as group.");
         }
         if outcome.left_out > 0 {
-            out.push_str(&format!(" {} smaller data files were left out (limit {MAX_FILES}).", outcome.left_out));
+            out.push_str(&format!(
+                " {} smaller data files were left out (limit {MAX_FILES}).",
+                outcome.left_out
+            ));
         }
         if let Some(error) = outcome.error {
             out.push_str(&format!(" Automatic indexing failed: {error}"));
@@ -334,7 +413,10 @@ mod tests {
     }
 
     fn names(found: &[DataFile]) -> Vec<String> {
-        let mut out: Vec<String> = found.iter().map(|f| f.path.file_name().unwrap().to_string_lossy().to_string()).collect();
+        let mut out: Vec<String> = found
+            .iter()
+            .map(|f| f.path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
         out.sort();
         out
     }
@@ -345,17 +427,37 @@ mod tests {
         fs::create_dir_all(root.join("exports/2026")).unwrap();
         fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
         fs::create_dir_all(root.join(".git")).unwrap();
-        let rows = |n: usize| (0..n).map(|i| format!("{{\"id\":\"r{i}\",\"text\":\"row {i}\"}}\n")).collect::<String>();
+        let rows = |n: usize| {
+            (0..n)
+                .map(|i| format!("{{\"id\":\"r{i}\",\"text\":\"row {i}\"}}\n"))
+                .collect::<String>()
+        };
         fs::write(root.join("big.jsonl"), rows(400)).unwrap();
         fs::write(root.join("exports/2026/more.ndjson"), rows(3)).unwrap();
         fs::write(root.join("tiny.csv"), "id,x\n1,2\n").unwrap();
         fs::write(root.join("semi.tsv"), "id\tx\n1\t2\n").unwrap();
         fs::write(root.join("logs.jsonl.gz"), [0x1f, 0x8b, 8, 0]).unwrap();
-        fs::write(root.join("customers.json"), r#"{"data": {"customers": [{"id": 1}, {"id": 2}]}}"#).unwrap();
+        fs::write(
+            root.join("customers.json"),
+            r#"{"data": {"customers": [{"id": 1}, {"id": 2}]}}"#,
+        )
+        .unwrap();
         fs::write(root.join("rows.json"), r#"[{"id": 1}]"#).unwrap();
-        fs::write(root.join("package.json"), r#"{"name": "x", "files": ["a", "b"]}"#).unwrap();
-        fs::write(root.join("config.json"), r#"{"retries": 3, "hosts": {"a": {"port": 1}, "b": {"port": 2}}}"#).unwrap();
-        fs::write(root.join("app.sqlite"), b"SQLite format 3\0rest-of-a-database").unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"name": "x", "files": ["a", "b"]}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("config.json"),
+            r#"{"retries": 3, "hosts": {"a": {"port": 1}, "b": {"port": 2}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("app.sqlite"),
+            b"SQLite format 3\0rest-of-a-database",
+        )
+        .unwrap();
         fs::write(root.join("fake.db"), "not a database").unwrap();
         fs::write(root.join("empty.csv"), "").unwrap();
         fs::write(root.join("notes.txt"), "x".repeat(5_000)).unwrap();
@@ -365,11 +467,27 @@ mod tests {
         let found = scan(&root, 1 << 20, &[]);
         assert_eq!(
             names(&found),
-            ["app.sqlite", "big.jsonl", "customers.json", "logs.jsonl.gz", "more.ndjson", "rows.json", "semi.tsv", "tiny.csv"]
+            [
+                "app.sqlite",
+                "big.jsonl",
+                "customers.json",
+                "logs.jsonl.gz",
+                "more.ndjson",
+                "rows.json",
+                "semi.tsv",
+                "tiny.csv"
+            ]
         );
-        assert_eq!(found[0].path.file_name().unwrap(), "big.jsonl", "largest first");
+        assert_eq!(
+            found[0].path.file_name().unwrap(),
+            "big.jsonl",
+            "largest first"
+        );
         let excluded = scan(&root, 1 << 20, &[root.join("exports")]);
-        assert!(!names(&excluded).contains(&"more.ndjson".into()), "excluded paths are skipped");
+        assert!(
+            !names(&excluded).contains(&"more.ndjson".into()),
+            "excluded paths are skipped"
+        );
         fs::remove_dir_all(root).ok();
     }
 
@@ -392,9 +510,16 @@ mod tests {
     #[test]
     fn large_json_is_data_without_looking_inside() {
         let root = dir("json");
-        fs::write(root.join("export.json"), format!("{{\"x\": \"{}\"}}", "y".repeat(2_000))).unwrap();
+        fs::write(
+            root.join("export.json"),
+            format!("{{\"x\": \"{}\"}}", "y".repeat(2_000)),
+        )
+        .unwrap();
         assert!(scan(&root, 1_000, &[]).len() == 1);
-        assert!(scan(&root, 1 << 20, &[]).is_empty(), "a small object without records is not data");
+        assert!(
+            scan(&root, 1 << 20, &[]).is_empty(),
+            "a small object without records is not data"
+        );
         fs::remove_dir_all(root).ok();
     }
 }

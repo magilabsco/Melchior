@@ -15,7 +15,12 @@ pub fn track(child: Child) -> Arc<Mutex<Child>> {
 
 /// Kill every tracked child that is still running.
 pub fn kill_all() {
-    let children: Vec<Arc<Mutex<Child>>> = CHILDREN.lock().unwrap().iter().filter_map(Weak::upgrade).collect();
+    let children: Vec<Arc<Mutex<Child>>> = CHILDREN
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(Weak::upgrade)
+        .collect();
     for child in children {
         if let Ok(mut child) = child.try_lock() {
             let _ = child.kill();

@@ -27,8 +27,8 @@
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use super::index::recall_query;
 use super::Leviathan;
+use super::index::recall_query;
 use crate::cordis::{Context, Plugin};
 use crate::json::Json;
 use crate::prompt::{PromptService, TurnContext, TurnCx, TurnEndCx, TurnEndHooks, TurnHooks};
@@ -63,15 +63,36 @@ impl MemoryConfig {
             recall: config.get("recall").as_bool().unwrap_or(true),
             journal: config.get("journal").as_bool().unwrap_or(true),
             guide: config.get("guide").as_bool().unwrap_or(true),
-            briefing_budget: config.get("briefingBudget").as_i64().unwrap_or(500).clamp(50, 4_000),
-            recall_budget: config.get("recallBudget").as_i64().unwrap_or(400).clamp(50, 4_000),
+            briefing_budget: config
+                .get("briefingBudget")
+                .as_i64()
+                .unwrap_or(500)
+                .clamp(50, 4_000),
+            recall_budget: config
+                .get("recallBudget")
+                .as_i64()
+                .unwrap_or(400)
+                .clamp(50, 4_000),
             min_query_chars: config.get("minQueryChars").as_i64().unwrap_or(8).max(1) as usize,
-            journal_importance: config.get("journalImportance").as_i64().unwrap_or(2).clamp(1, 5),
+            journal_importance: config
+                .get("journalImportance")
+                .as_i64()
+                .unwrap_or(2)
+                .clamp(1, 5),
             journal_expires: match config.get("journalExpires") {
                 Json::Null => Some("90d".into()),
-                value => value.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+                value => value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
             },
-            journal_skip: config.get("journalSkip").items().iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+            journal_skip: config
+                .get("journalSkip")
+                .items()
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect(),
         }
     }
 }
@@ -91,7 +112,11 @@ struct Recalled {
 
 impl Memory {
     pub fn new(leviathan: Arc<Leviathan>, config: MemoryConfig) -> Memory {
-        Memory { leviathan, config, in_flight: (Mutex::new(0), Condvar::new()) }
+        Memory {
+            leviathan,
+            config,
+            in_flight: (Mutex::new(0), Condvar::new()),
+        }
     }
 
     /// Wait (at most `limit`) for journal writes still running.
@@ -100,7 +125,11 @@ impl Memory {
         let guard = count.lock().unwrap();
         let (guard, _) = done.wait_timeout_while(guard, limit, |n| *n > 0).unwrap();
         if *guard > 0 {
-            log_info!("memory", "shutting down with {} journal writes unfinished", *guard);
+            log_info!(
+                "memory",
+                "shutting down with {} journal writes unfinished",
+                *guard
+            );
         }
     }
 
@@ -127,22 +156,38 @@ impl Memory {
         }
         Some(Recalled {
             lines: rows.iter().map(|r| memory_line(r)).collect(),
-            ids: rows.iter().filter_map(|r| r.get("id").as_str().map(str::to_string)).collect(),
+            ids: rows
+                .iter()
+                .filter_map(|r| r.get("id").as_str().map(str::to_string))
+                .collect(),
         })
     }
 
     /// The `<agent_memory>` block for one user message.
     pub fn context(&self, session: &Session, message: &str) -> Option<TurnContext> {
-        let first = session.records().iter().filter(|r| r.get("type").as_str() == Some("message/user")).count() <= 1;
+        let first = session
+            .records()
+            .iter()
+            .filter(|r| r.get("type").as_str() == Some("message/user"))
+            .count()
+            <= 1;
         let briefing = if first && self.config.briefing {
             self.recall_json(jobj! { "budget" => self.config.briefing_budget }, true)
         } else {
             None
         };
         let query = recall_query(message);
-        let recalled = if self.config.recall && query.chars().count() >= self.config.min_query_chars {
-            self.recall_json(jobj! { "query" => query.as_str(), "budget" => self.config.recall_budget }, false)
-                .filter(|r| briefing.as_ref().is_none_or(|b| !r.ids.iter().all(|id| b.ids.contains(id))))
+        let recalled = if self.config.recall && query.chars().count() >= self.config.min_query_chars
+        {
+            self.recall_json(
+                jobj! { "query" => query.as_str(), "budget" => self.config.recall_budget },
+                false,
+            )
+            .filter(|r| {
+                briefing
+                    .as_ref()
+                    .is_none_or(|b| !r.ids.iter().all(|id| b.ids.contains(id)))
+            })
         } else {
             None
         };
@@ -168,22 +213,36 @@ impl Memory {
         }
         out.push_str("</agent_memory>");
         log_debug!("memory", "attached {} chars of memory", out.len());
-        Some(TurnContext { source: "leviathan-memory".into(), text: out })
+        Some(TurnContext {
+            source: "leviathan-memory".into(),
+            text: out,
+        })
     }
 
     /// Record an answered turn as one `event` memory, off the turn's thread.
     pub fn journal(self: &Arc<Self>, cx: &TurnEndCx<'_>) {
-        if !self.config.journal || cx.reason != "stop" || self.config.journal_skip.iter().any(|p| cx.session.id.starts_with(p.as_str())) {
+        if !self.config.journal
+            || cx.reason != "stop"
+            || self
+                .config
+                .journal_skip
+                .iter()
+                .any(|p| cx.session.id.starts_with(p.as_str()))
+        {
             return;
         }
         // Resolved now: during shutdown the backend may be gone from the
         // registry by the time the thread runs.
-        let Some(backend) = self.leviathan.backend().filter(|b| b.has(REMEMBER)) else { return };
+        let Some(backend) = self.leviathan.backend().filter(|b| b.has(REMEMBER)) else {
+            return;
+        };
         let question = recall_query(cx.text);
         if question.chars().count() < self.config.min_query_chars {
             return;
         }
-        let Some(text) = journal_text(&question, cx.answer) else { return };
+        let Some(text) = journal_text(&question, cx.answer) else {
+            return;
+        };
         let mut args = jobj! {
             "text" => text.as_str(),
             "kind" => "event",
@@ -199,13 +258,15 @@ impl Memory {
         }
         *self.in_flight.0.lock().unwrap() += 1;
         let memory = self.clone();
-        let spawned = std::thread::Builder::new().name("memory-journal".into()).spawn(move || {
-            match backend.call(REMEMBER, args) {
-                Ok(_) => log_debug!("memory", "journaled {} chars", text.len()),
-                Err(e) => log_info!("memory", "journal write failed: {e}"),
-            }
-            memory.finish_write();
-        });
+        let spawned = std::thread::Builder::new()
+            .name("memory-journal".into())
+            .spawn(move || {
+                match backend.call(REMEMBER, args) {
+                    Ok(_) => log_debug!("memory", "journaled {} chars", text.len()),
+                    Err(e) => log_info!("memory", "journal write failed: {e}"),
+                }
+                memory.finish_write();
+            });
         if let Err(error) = spawned {
             log_info!("memory", "journal thread failed to start: {error}");
             self.finish_write();
@@ -233,7 +294,9 @@ impl Memory {
             ));
         }
         if let Some(forget) = forget {
-            out.push_str(&format!("- Retire a memory that turned out wrong with `{forget}`.\n"));
+            out.push_str(&format!(
+                "- Retire a memory that turned out wrong with `{forget}`.\n"
+            ));
         }
         out.push_str(
             "- Never save secrets or credentials, and don't copy what the workspace index already holds; save what you \
@@ -261,7 +324,11 @@ fn memory_line(row: &Json) -> String {
         meta.push("pinned".into());
     }
     meta.push(row.get("id").str_or("?").to_string());
-    format!("{out} {} ({})", row.get("text").str_or("").trim(), meta.join(" · "))
+    format!(
+        "{out} {} ({})",
+        row.get("text").str_or("").trim(),
+        meta.join(" · ")
+    )
 }
 
 /// `Asked: "...". Answered: ...`, within Leviathan's 400-character cap. The
@@ -277,15 +344,28 @@ pub fn journal_text(question: &str, answer: &str) -> Option<String> {
             fenced = !fenced;
             continue;
         }
-        if fenced || line.is_empty() || line.starts_with('|') || line.starts_with('#') || line.starts_with("---") {
+        if fenced
+            || line.is_empty()
+            || line.starts_with('|')
+            || line.starts_with('#')
+            || line.starts_with("---")
+        {
             continue;
         }
-        prose.push(line.trim_start_matches(['-', '*', '>', ' ']).replace("**", "").replace('`', ""));
+        prose.push(
+            line.trim_start_matches(['-', '*', '>', ' '])
+                .replace("**", "")
+                .replace('`', ""),
+        );
         if prose.iter().map(String::len).sum::<usize>() > MAX_CHARS {
             break;
         }
     }
-    let prose = prose.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let prose = prose
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if prose.is_empty() {
         return None;
     }
@@ -308,7 +388,10 @@ impl Plugin for LeviathanMemoryPlugin {
 
     fn apply(&self, ctx: &Context) -> Result<(), String> {
         let config = MemoryConfig::from_json(ctx.config());
-        let memory = Arc::new(Memory::new(ctx.inject::<Leviathan>("leviathan")?, config.clone()));
+        let memory = Arc::new(Memory::new(
+            ctx.inject::<Leviathan>("leviathan")?,
+            config.clone(),
+        ));
         ctx.provide("leviathan-memory", memory.clone())?;
         let flushing = memory.clone();
         ctx.effect(move || flushing.flush(Duration::from_secs(5)));
@@ -360,8 +443,16 @@ mod tests {
 
     #[test]
     fn journal_stays_within_leviathans_cap() {
-        let text = journal_text(&"why ".repeat(100), &"because the spindle overheated. ".repeat(40)).unwrap();
-        assert!(text.chars().count() <= MAX_CHARS, "{}", text.chars().count());
+        let text = journal_text(
+            &"why ".repeat(100),
+            &"because the spindle overheated. ".repeat(40),
+        )
+        .unwrap();
+        assert!(
+            text.chars().count() <= MAX_CHARS,
+            "{}",
+            text.chars().count()
+        );
         assert!(text.ends_with('…'));
     }
 
@@ -371,8 +462,14 @@ mod tests {
             r#"{"id":"m1","kind":"preference","subject":"Sarah","key":"report.format","text":"Wants tables","valid_from":"2026-10-25T10:00:00Z","pinned":true}"#,
         )
         .unwrap();
-        assert_eq!(memory_line(&row), "[preference] Sarah · report.format: Wants tables (2026-10-25 · pinned · m1)");
-        let row = json::parse(r#"{"id":"m2","kind":"event","text":"Asked: \"x\"","valid_from":"2026-10-24"}"#).unwrap();
+        assert_eq!(
+            memory_line(&row),
+            "[preference] Sarah · report.format: Wants tables (2026-10-25 · pinned · m1)"
+        );
+        let row = json::parse(
+            r#"{"id":"m2","kind":"event","text":"Asked: \"x\"","valid_from":"2026-10-24"}"#,
+        )
+        .unwrap();
         assert_eq!(memory_line(&row), "[event] Asked: \"x\" (2026-10-24 · m2)");
     }
 
@@ -382,7 +479,10 @@ mod tests {
         assert!(config.briefing && config.recall && config.journal && config.guide);
         assert_eq!(config.journal_expires.as_deref(), Some("90d"));
         assert!(config.journal_skip.is_empty());
-        let config = MemoryConfig::from_json(&json::parse(r#"{"journal":false,"journalExpires":"","journalSkip":["eval-"]}"#).unwrap());
+        let config = MemoryConfig::from_json(
+            &json::parse(r#"{"journal":false,"journalExpires":"","journalSkip":["eval-"]}"#)
+                .unwrap(),
+        );
         assert!(!config.journal);
         assert_eq!(config.journal_expires, None);
         assert_eq!(config.journal_skip, vec!["eval-".to_string()]);

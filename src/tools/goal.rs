@@ -43,7 +43,8 @@ impl Tool for GetGoal {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "get_goal".into(),
-            description: "Return the current session goal with its id, revision, and status.".into(),
+            description: "Return the current session goal with its id, revision, and status."
+                .into(),
             parameters: schema(jobj! {}, &[]),
         }
     }
@@ -71,7 +72,10 @@ impl Tool for CreateGoal {
         let objective = try_out!(str_arg(args, "objective"));
         let current = cx.session.state(STATE_KEY);
         if matches!(current.get("status").as_str(), Some("active" | "paused")) {
-            return ToolOutput::err(format!("an unfinished goal already exists:\n{}", render(&current)));
+            return ToolOutput::err(format!(
+                "an unfinished goal already exists:\n{}",
+                render(&current)
+            ));
         }
         let mut goal = jobj! {
             "id" => util::new_id("goal"),
@@ -115,10 +119,14 @@ impl Tool for UpdateGoal {
         let revision = opt_i64(args, "revision").unwrap_or(-1);
         let mut goal = cx.session.state(STATE_KEY);
         if goal.get("id").as_str() != Some(id) {
-            return ToolOutput::err(format!("goal {id:?} is not the current goal; call get_goal"));
+            return ToolOutput::err(format!(
+                "goal {id:?} is not the current goal; call get_goal"
+            ));
         }
         if goal.get("revision").as_i64() != Some(revision) {
-            return ToolOutput::err("stale revision; call get_goal and retry with the current revision");
+            return ToolOutput::err(
+                "stale revision; call get_goal and retry with the current revision",
+            );
         }
         let status = match action {
             "edit" => {
@@ -134,7 +142,8 @@ impl Tool for UpdateGoal {
             "resume" => "active".into(),
             "complete" => "complete".into(),
             "blocked" => {
-                let Some(reason) = opt_str(args, "blocked_reason").filter(|r| !r.trim().is_empty()) else {
+                let Some(reason) = opt_str(args, "blocked_reason").filter(|r| !r.trim().is_empty())
+                else {
                     return ToolOutput::err("blocked requires blocked_reason");
                 };
                 goal.set("blockedReason", reason);

@@ -42,10 +42,18 @@ impl std::fmt::Display for SessionError {
         match self {
             SessionError::Exists(id) => write!(f, "session \"{id}\" already exists"),
             SessionError::NotFound(id) => write!(f, "session \"{id}\" not found"),
-            SessionError::AlreadyOpen(id) => write!(f, "session \"{id}\" is already open or opening"),
-            SessionError::Owned(id) => write!(f, "session \"{id}\" is already owned by another harness process"),
+            SessionError::AlreadyOpen(id) => {
+                write!(f, "session \"{id}\" is already open or opening")
+            }
+            SessionError::Owned(id) => write!(
+                f,
+                "session \"{id}\" is already owned by another harness process"
+            ),
             SessionError::Corrupt(id, detail) => {
-                write!(f, "session \"{id}\" history is corrupt ({detail}); refusing to resume it")
+                write!(
+                    f,
+                    "session \"{id}\" history is corrupt ({detail}); refusing to resume it"
+                )
             }
             SessionError::Invalid(id) => write!(f, "invalid session id {id:?}"),
             SessionError::Io(detail) => write!(f, "session storage error: {detail}"),
@@ -98,8 +106,10 @@ impl Session {
             let mut file = log.lock().unwrap();
             let mut line = record.to_string();
             line.push('\n');
-            file.write_all(line.as_bytes()).map_err(|e| format!("cannot write session log: {e}"))?;
-            file.sync_data().map_err(|e| format!("cannot sync session log: {e}"))?;
+            file.write_all(line.as_bytes())
+                .map_err(|e| format!("cannot write session log: {e}"))?;
+            file.sync_data()
+                .map_err(|e| format!("cannot sync session log: {e}"))?;
         }
         records.push(record.clone());
         Ok(record)
@@ -120,13 +130,17 @@ impl Session {
             .unwrap()
             .iter()
             .rev()
-            .find(|r| r.get("type").as_str() == Some("state") && r.get("data").get("key").as_str() == Some(key))
+            .find(|r| {
+                r.get("type").as_str() == Some("state")
+                    && r.get("data").get("key").as_str() == Some(key)
+            })
             .map(|r| r.get("data").get("value").clone())
             .unwrap_or(Json::Null)
     }
 
     pub fn set_state(&self, key: &str, value: Json) -> Result<(), String> {
-        self.append("state", jobj! { "key" => key, "value" => value }).map(|_| ())
+        self.append("state", jobj! { "key" => key, "value" => value })
+            .map(|_| ())
     }
 }
 
@@ -193,7 +207,10 @@ impl SessionStore {
         if !opening.insert(id.to_string()) {
             return Err(SessionError::AlreadyOpen(id.to_string()));
         }
-        Ok(OpeningGuard { store: self, id: id.to_string() })
+        Ok(OpeningGuard {
+            store: self,
+            id: id.to_string(),
+        })
     }
 
     fn lock(&self, dir: &Path, id: &str) -> Result<File, SessionError> {
@@ -217,7 +234,9 @@ impl SessionStore {
         fs::create_dir_all(&self.root).map_err(|e| SessionError::Io(e.to_string()))?;
         match fs::create_dir(&dir) {
             Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(SessionError::Exists(id.to_string())),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(SessionError::Exists(id.to_string()));
+            }
             Err(e) => return Err(SessionError::Io(e.to_string())),
         }
         let lock = self.lock(&dir, id)?;
@@ -245,7 +264,10 @@ impl SessionStore {
         if let Ok(handle) = File::open(&dir) {
             let _ = handle.sync_all();
         }
-        self.open.lock().unwrap().insert(id.to_string(), session.clone());
+        self.open
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), session.clone());
         Ok(session)
     }
 
@@ -261,19 +283,37 @@ impl SessionStore {
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(SessionError::Corrupt(id.to_string(), "history file is missing".into()));
+                return Err(SessionError::Corrupt(
+                    id.to_string(),
+                    "history file is missing".into(),
+                ));
             }
             Err(e) => return Err(SessionError::Io(e.to_string())),
         };
         let (records, committed_len) = parse_log(id, &bytes)?;
         if committed_len < bytes.len() {
-            crate::log_warn!("session", "{id}: dropping {} bytes of a torn final record", bytes.len() - committed_len);
-            let file = OpenOptions::new().write(true).open(&path).map_err(|e| SessionError::Io(e.to_string()))?;
-            file.set_len(committed_len as u64).map_err(|e| SessionError::Io(e.to_string()))?;
-            file.sync_all().map_err(|e| SessionError::Io(e.to_string()))?;
+            crate::log_warn!(
+                "session",
+                "{id}: dropping {} bytes of a torn final record",
+                bytes.len() - committed_len
+            );
+            let file = OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .map_err(|e| SessionError::Io(e.to_string()))?;
+            file.set_len(committed_len as u64)
+                .map_err(|e| SessionError::Io(e.to_string()))?;
+            file.sync_all()
+                .map_err(|e| SessionError::Io(e.to_string()))?;
         }
-        let log = OpenOptions::new().append(true).open(&path).map_err(|e| SessionError::Io(e.to_string()))?;
-        let last_seq = records.last().and_then(|r| r.get("seq").as_i64()).unwrap_or(0) as u64;
+        let log = OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .map_err(|e| SessionError::Io(e.to_string()))?;
+        let last_seq = records
+            .last()
+            .and_then(|r| r.get("seq").as_i64())
+            .unwrap_or(0) as u64;
         let session = Arc::new(Session {
             id: id.to_string(),
             dir: Some(dir),
@@ -284,7 +324,10 @@ impl SessionStore {
             busy: AtomicBool::new(false),
             cancel: AtomicBool::new(false),
         });
-        self.open.lock().unwrap().insert(id.to_string(), session.clone());
+        self.open
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), session.clone());
         Ok(session)
     }
 
@@ -308,22 +351,38 @@ impl Drop for OpeningGuard<'_> {
 /// prefix (everything up to the last newline).
 fn parse_log(id: &str, bytes: &[u8]) -> Result<(Vec<Json>, usize), SessionError> {
     let corrupt = |detail: String| SessionError::Corrupt(id.to_string(), detail);
-    let committed_len = bytes.iter().rposition(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
-    let text = std::str::from_utf8(&bytes[..committed_len]).map_err(|_| corrupt("history is not UTF-8".into()))?;
+    let committed_len = bytes
+        .iter()
+        .rposition(|b| *b == b'\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let text = std::str::from_utf8(&bytes[..committed_len])
+        .map_err(|_| corrupt("history is not UTF-8".into()))?;
     let mut records = Vec::new();
     let mut last_seq = 0;
     for (index, line) in text.split_terminator('\n').enumerate() {
         let number = index + 1;
         let record = json::parse(line).map_err(|e| corrupt(format!("line {number}: {e}")))?;
-        let kind = record.get("type").as_str().ok_or_else(|| corrupt(format!("line {number}: record has no type")))?;
-        let seq = record.get("seq").as_i64().ok_or_else(|| corrupt(format!("line {number}: record has no seq")))?;
+        let kind = record
+            .get("type")
+            .as_str()
+            .ok_or_else(|| corrupt(format!("line {number}: record has no type")))?;
+        let seq = record
+            .get("seq")
+            .as_i64()
+            .ok_or_else(|| corrupt(format!("line {number}: record has no seq")))?;
         if record.get("v").as_i64() != Some(FORMAT_VERSION) {
-            return Err(corrupt(format!("line {number}: unsupported record version")));
+            return Err(corrupt(format!(
+                "line {number}: unsupported record version"
+            )));
         }
         if seq <= last_seq {
             return Err(corrupt(format!("line {number}: sequence goes backwards")));
         }
-        if number == 1 && (kind != "session/created" || record.get("data").get("sessionId").as_str() != Some(id)) {
+        if number == 1
+            && (kind != "session/created"
+                || record.get("data").get("sessionId").as_str() != Some(id))
+        {
             return Err(corrupt("first record does not create this session".into()));
         }
         last_seq = seq;
@@ -340,7 +399,8 @@ mod tests {
     use super::*;
 
     fn temp_home(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("melchior-test-{name}-{}", util::random_hex(6)));
+        let dir =
+            std::env::temp_dir().join(format!("melchior-test-{name}-{}", util::random_hex(6)));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -350,19 +410,38 @@ mod tests {
         let home = temp_home("sessions");
         let store = SessionStore::new(home.join("sessions"));
         let session = store.create("s1").unwrap();
-        session.append("message/user", jobj! { "id" => "m1", "content" => "hello" }).unwrap();
-        assert_eq!(store.create("s1").err(), Some(SessionError::AlreadyOpen("s1".into())));
-        assert_eq!(store.resume("s1").err(), Some(SessionError::AlreadyOpen("s1".into())));
+        session
+            .append("message/user", jobj! { "id" => "m1", "content" => "hello" })
+            .unwrap();
+        assert_eq!(
+            store.create("s1").err(),
+            Some(SessionError::AlreadyOpen("s1".into()))
+        );
+        assert_eq!(
+            store.resume("s1").err(),
+            Some(SessionError::AlreadyOpen("s1".into()))
+        );
         let other = SessionStore::new(home.join("sessions"));
-        assert_eq!(other.resume("s1").err(), Some(SessionError::Owned("s1".into())));
-        assert_eq!(other.create("s1").err(), Some(SessionError::Exists("s1".into())));
-        assert_eq!(other.resume("missing").err(), Some(SessionError::NotFound("missing".into())));
+        assert_eq!(
+            other.resume("s1").err(),
+            Some(SessionError::Owned("s1".into()))
+        );
+        assert_eq!(
+            other.create("s1").err(),
+            Some(SessionError::Exists("s1".into()))
+        );
+        assert_eq!(
+            other.resume("missing").err(),
+            Some(SessionError::NotFound("missing".into()))
+        );
         assert!(!home.join("sessions/missing").exists());
         drop(session);
         store.close("s1");
         let resumed = other.resume("s1").unwrap();
         assert_eq!(resumed.record_count(), 2);
-        resumed.append("message/user", jobj! { "id" => "m2", "content" => "again" }).unwrap();
+        resumed
+            .append("message/user", jobj! { "id" => "m2", "content" => "again" })
+            .unwrap();
         assert_eq!(resumed.records()[2].get("seq").as_i64(), Some(3));
         fs::remove_dir_all(home).ok();
     }
@@ -380,7 +459,10 @@ mod tests {
         let fresh = SessionStore::new(home.join("sessions"));
         let error = fresh.resume("bad").err().unwrap();
         assert!(error.to_string().contains("corrupt"), "{error}");
-        assert_eq!(fs::read(&bad).unwrap(), b"deliberately corrupt session for regression test\n");
+        assert_eq!(
+            fs::read(&bad).unwrap(),
+            b"deliberately corrupt session for regression test\n"
+        );
         let torn = home.join("sessions/torn").join(LOG_FILE);
         let mut contents = fs::read(&torn).unwrap();
         let committed = contents.len();

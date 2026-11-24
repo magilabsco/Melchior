@@ -31,7 +31,9 @@ impl Notifier {
     }
 
     pub fn with_sink(sink: impl Fn(&str) + Send + Sync + 'static) -> Notifier {
-        Notifier { sink: Mutex::new(Box::new(sink)) }
+        Notifier {
+            sink: Mutex::new(Box::new(sink)),
+        }
     }
 
     pub fn silent() -> Notifier {
@@ -62,11 +64,17 @@ impl Notifier {
 
     /// `session.event` carries one session event: `{sessionId, event: {type, data, ...}}`.
     pub fn session_event(&self, session_id: &str, event: Json) {
-        self.notify("session.event", jobj! { "sessionId" => session_id, "event" => event });
+        self.notify(
+            "session.event",
+            jobj! { "sessionId" => session_id, "event" => event },
+        );
     }
 
     pub fn session_status(&self, session_id: &str, status: &str) {
-        self.notify("session.status", jobj! { "sessionId" => session_id, "status" => status });
+        self.notify(
+            "session.status",
+            jobj! { "sessionId" => session_id, "status" => status },
+        );
     }
 }
 
@@ -77,10 +85,16 @@ pub struct RpcError {
 
 impl RpcError {
     pub fn internal(message: impl Into<String>) -> RpcError {
-        RpcError { code: INTERNAL_ERROR, message: message.into() }
+        RpcError {
+            code: INTERNAL_ERROR,
+            message: message.into(),
+        }
     }
     pub fn params(message: impl Into<String>) -> RpcError {
-        RpcError { code: INVALID_PARAMS, message: message.into() }
+        RpcError {
+            code: INVALID_PARAMS,
+            message: message.into(),
+        }
     }
 }
 

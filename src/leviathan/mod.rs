@@ -28,8 +28,8 @@
 //! registry (a host's permission-checked gateway, for example) and select
 //! them with `backend: <name>`.
 
-pub mod index;
 pub mod auto;
+pub mod index;
 pub mod memory;
 pub mod tools;
 
@@ -77,12 +77,20 @@ pub fn call_json(server: &McpServer, raw_name: &str, mut args: Json) -> Result<J
     args.set("format", "json");
     let output = server.call(raw_name, &args);
     if output.is_error {
-        return Err(format!("{raw_name} failed: {}", util::truncate(&output.content, 300, "…")));
+        return Err(format!(
+            "{raw_name} failed: {}",
+            util::truncate(&output.content, 300, "…")
+        ));
     }
     json::parse(&output.content)
         .ok()
         .filter(|v| matches!(v, Json::Obj(_)))
-        .ok_or_else(|| format!("{raw_name} returned no JSON: {}", util::truncate(&output.content, 200, "…")))
+        .ok_or_else(|| {
+            format!(
+                "{raw_name} returned no JSON: {}",
+                util::truncate(&output.content, 200, "…")
+            )
+        })
 }
 
 // ---- the mcp backend -------------------------------------------------------
@@ -101,7 +109,12 @@ pub struct McpBackend {
 
 impl McpBackend {
     pub fn new(hub: Arc<McpHub>, server: Option<String>, prefix: Option<String>) -> McpBackend {
-        McpBackend { hub, server, prefix, seen: Mutex::new(HashMap::new()) }
+        McpBackend {
+            hub,
+            server,
+            prefix,
+            seen: Mutex::new(HashMap::new()),
+        }
     }
 
     /// The server and raw tool that answer `tool`, falling back to where it
@@ -114,7 +127,10 @@ impl McpBackend {
                 seen.insert(tool.to_string(), found.clone());
                 Some(found)
             }
-            None => seen.get(tool).filter(|(server, _)| !self.hub.servers().iter().any(|s| Arc::ptr_eq(s, server))).cloned(),
+            None => seen
+                .get(tool)
+                .filter(|(server, _)| !self.hub.servers().iter().any(|s| Arc::ptr_eq(s, server)))
+                .cloned(),
         }
     }
 
@@ -124,7 +140,10 @@ impl McpBackend {
             None => vec!["leviathan.", "leviathan_"],
         };
         for prefix in &prefixes {
-            if let Some(found) = self.hub.find(self.server.as_deref(), &format!("{prefix}{tool}")) {
+            if let Some(found) = self
+                .hub
+                .find(self.server.as_deref(), &format!("{prefix}{tool}"))
+            {
                 return Some(found);
             }
         }
@@ -135,20 +154,29 @@ impl McpBackend {
         self.hub
             .servers()
             .into_iter()
-            .filter(|s| self.server.as_deref().map_or(s.name.contains("leviathan"), |n| s.name == n))
+            .filter(|s| {
+                self.server
+                    .as_deref()
+                    .map_or(s.name.contains("leviathan"), |n| s.name == n)
+            })
             .find_map(|s| s.find(tool).map(|t| (s.clone(), t)))
     }
 }
 
 impl Backend for McpBackend {
     fn label(&self) -> String {
-        format!("MCP server {}", self.server.as_deref().unwrap_or("(discovered)"))
+        format!(
+            "MCP server {}",
+            self.server.as_deref().unwrap_or("(discovered)")
+        )
     }
     fn has(&self, tool: &str) -> bool {
         self.find(tool).is_some()
     }
     fn call(&self, tool: &str, args: Json) -> Result<Json, String> {
-        let (server, raw) = self.locate(tool).ok_or(format!("Leviathan's {tool} is not available"))?;
+        let (server, raw) = self
+            .locate(tool)
+            .ok_or(format!("Leviathan's {tool} is not available"))?;
         call_json(&server, &raw.name, args)
     }
     fn public_name(&self, tool: &str) -> Option<String> {
@@ -179,7 +207,12 @@ impl OwnedBackend {
         self.last_try.store(util::unix_millis(), Ordering::SeqCst);
         self.server.connect()?;
         (self.on_connect)(&self.server);
-        log_info!("leviathan", "connected to {} ({} tools)", self.label, self.server.tools.lock().unwrap().len());
+        log_info!(
+            "leviathan",
+            "connected to {} ({} tools)",
+            self.label,
+            self.server.tools.lock().unwrap().len()
+        );
         Ok(())
     }
 
@@ -192,7 +225,11 @@ impl OwnedBackend {
             return false;
         }
         if let Err(e) = self.connect() {
-            log_warn!("leviathan", "{}: {e}; will retry before the next turn", self.label);
+            log_warn!(
+                "leviathan",
+                "{}: {e}; will retry before the next turn",
+                self.label
+            );
         }
         self.server.connected.load(Ordering::SeqCst)
     }
@@ -251,13 +288,18 @@ pub struct LeviathanConfig {
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
-    value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 impl LeviathanConfig {
     /// Config keys first, then `LEVIATHAN_*` environment variables.
     pub fn from_json(config: &Json, runtime: &Runtime) -> LeviathanConfig {
-        let text = |key: &str, env: &str| non_empty(config.get(key).as_str().map(str::to_string)).or_else(|| non_empty(std::env::var(env).ok()));
+        let text = |key: &str, env: &str| {
+            non_empty(config.get(key).as_str().map(str::to_string))
+                .or_else(|| non_empty(std::env::var(env).ok()))
+        };
         let memory = match config.get("memory") {
             Json::Bool(false) => None,
             _ => text("memory", "LEVIATHAN_MEMORY").map(|p| runtime.resolve_path(&p)),
@@ -270,7 +312,8 @@ impl LeviathanConfig {
             index: text("index", "LEVIATHAN_INDEX").map(|p| runtime.resolve_path(&p)),
             memory,
             url: text("url", "LEVIATHAN_URL"),
-            token: non_empty(config.get("token").as_str().map(str::to_string)).or_else(|| non_empty(std::env::var(&token_env).ok())),
+            token: non_empty(config.get("token").as_str().map(str::to_string))
+                .or_else(|| non_empty(std::env::var(&token_env).ok())),
             server: config.get("server").as_str().map(str::to_string),
             prefix: config.get("prefix").as_str().map(str::to_string),
             namespace: non_empty(config.get("namespace").as_str().map(str::to_string)),
@@ -278,15 +321,37 @@ impl LeviathanConfig {
             tools: config.get("tools").as_bool().unwrap_or(true),
             index_tool: config.get("indexTool").as_bool().unwrap_or(true),
             auto_index: config.get("autoIndex").as_bool().unwrap_or(true),
-            auto_index_min_bytes: config.get("autoIndexMinBytes").as_i64().unwrap_or(1 << 20).max(0) as u64,
+            auto_index_min_bytes: config
+                .get("autoIndexMinBytes")
+                .as_i64()
+                .unwrap_or(1 << 20)
+                .max(0) as u64,
             briefing: config.get("briefing").as_bool().unwrap_or(true),
             recall: config.get("recall").as_bool().unwrap_or(true),
             recall_limit: config.get("recallLimit").as_i64().unwrap_or(5).clamp(1, 20),
             min_relevance: config.get("minRelevance").as_f64().unwrap_or(0.15),
             min_query_chars: config.get("minQueryChars").as_i64().unwrap_or(8).max(1) as usize,
-            briefing_ttl: Duration::from_secs(config.get("briefingTtlSeconds").as_i64().unwrap_or(120).max(0) as u64),
-            call_timeout: Duration::from_secs(config.get("timeoutSeconds").as_i64().unwrap_or(60).clamp(5, 900) as u64),
-            index_timeout: Duration::from_secs(config.get("indexTimeoutSeconds").as_i64().unwrap_or(3600).clamp(10, 86_400) as u64),
+            briefing_ttl: Duration::from_secs(
+                config
+                    .get("briefingTtlSeconds")
+                    .as_i64()
+                    .unwrap_or(120)
+                    .max(0) as u64,
+            ),
+            call_timeout: Duration::from_secs(
+                config
+                    .get("timeoutSeconds")
+                    .as_i64()
+                    .unwrap_or(60)
+                    .clamp(5, 900) as u64,
+            ),
+            index_timeout: Duration::from_secs(
+                config
+                    .get("indexTimeoutSeconds")
+                    .as_i64()
+                    .unwrap_or(3600)
+                    .clamp(10, 86_400) as u64,
+            ),
         }
     }
 }
@@ -297,7 +362,11 @@ pub fn find_binary(name: &str) -> Option<PathBuf> {
         let path = PathBuf::from(name);
         return path.is_file().then_some(path);
     }
-    std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).map(|dir| dir.join(name)).find(|p| p.is_file()))
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(name))
+            .find(|p| p.is_file())
+    })
 }
 
 // ---- the service -----------------------------------------------------------
@@ -319,14 +388,24 @@ pub struct Leviathan {
 
 impl Leviathan {
     pub fn new(backends: Arc<Backends>, config: LeviathanConfig) -> Leviathan {
-        Leviathan { backends, config, implicit: None, briefing: Mutex::new(None), index_tool: AtomicBool::new(false), note: Mutex::new(None) }
+        Leviathan {
+            backends,
+            config,
+            implicit: None,
+            briefing: Mutex::new(None),
+            index_tool: AtomicBool::new(false),
+            note: Mutex::new(None),
+        }
     }
 
     /// Whether the implicit per-workspace backend is the one in use (no
     /// configured or discovered backend answers).
     pub fn implicit_in_use(&self) -> bool {
-        let Some(implicit) = &self.implicit else { return false };
-        self.backend().is_some_and(|b| b.label() == implicit.label())
+        let Some(implicit) = &self.implicit else {
+            return false;
+        };
+        self.backend()
+            .is_some_and(|b| b.label() == implicit.label())
     }
 
     fn reachable(backend: &dyn Backend) -> bool {
@@ -344,10 +423,16 @@ impl Leviathan {
                 return Some(backend.clone());
             }
         }
-        if let Some((_, backend)) = all.iter().find(|(n, b)| n != "mcp" && n != "implicit" && Self::reachable(b.as_ref().as_ref())) {
+        if let Some((_, backend)) = all
+            .iter()
+            .find(|(n, b)| n != "mcp" && n != "implicit" && Self::reachable(b.as_ref().as_ref()))
+        {
             return Some(backend.clone());
         }
-        if let Some((_, backend)) = all.iter().find(|(n, b)| n == "mcp" && Self::reachable(b.as_ref().as_ref())) {
+        if let Some((_, backend)) = all
+            .iter()
+            .find(|(n, b)| n == "mcp" && Self::reachable(b.as_ref().as_ref()))
+        {
             return Some(backend.clone());
         }
         let implicit = self.implicit.as_ref()?;
@@ -410,7 +495,10 @@ impl Leviathan {
                 record_count: describe.get("record_count").as_i64().unwrap_or(0),
             }),
             // No data index yet: say how to make one, if the agent can.
-            None if names.index.is_some() => Some(index::Briefing { text: index::render_empty(&names), record_count: 0 }),
+            None if names.index.is_some() => Some(index::Briefing {
+                text: index::render_empty(&names),
+                record_count: 0,
+            }),
             None => None,
         };
         let fresh = match (fresh, self.note.lock().unwrap().clone()) {
@@ -432,8 +520,12 @@ impl Leviathan {
             get: name("get"),
             resolve: name("resolve_group"),
             aggregate: name("aggregate"),
-            index: self.index_tool.load(Ordering::SeqCst).then(|| tools::INDEX_TOOL.to_string()),
-            renamed: backend.is_some_and(|b| b.public_name("search").is_some_and(|n| n != "search")),
+            index: self
+                .index_tool
+                .load(Ordering::SeqCst)
+                .then(|| tools::INDEX_TOOL.to_string()),
+            renamed: backend
+                .is_some_and(|b| b.public_name("search").is_some_and(|n| n != "search")),
         }
     }
 
@@ -445,10 +537,21 @@ impl Leviathan {
         if self.config.briefing && self.briefing().is_some_and(|b| b.record_count == 0) {
             return None;
         }
-        let result = self.call("search", crate::jobj! { "query" => query.as_str(), "limit" => self.config.recall_limit })?;
+        let result = self.call(
+            "search",
+            crate::jobj! { "query" => query.as_str(), "limit" => self.config.recall_limit },
+        )?;
         let text = index::render_recall(&result, self.config.min_relevance, &self.tool_names())?;
-        log_debug!("leviathan", "recalled {} chars for {:?}", text.len(), util::truncate(&query, 80, "…"));
-        Some(TurnContext { source: "leviathan".into(), text })
+        log_debug!(
+            "leviathan",
+            "recalled {} chars for {:?}",
+            text.len(),
+            util::truncate(&query, 80, "…")
+        );
+        Some(TurnContext {
+            source: "leviathan".into(),
+            text,
+        })
     }
 }
 
@@ -456,12 +559,25 @@ impl Leviathan {
 
 /// Where the implicit local backend keeps one workspace's index and memory.
 fn implicit_paths(runtime: &Runtime) -> (PathBuf, PathBuf) {
-    let key = format!("{:012x}", util::fnv1a(runtime.cwd.to_string_lossy().as_bytes()) & 0xffff_ffff_ffff);
+    let key = format!(
+        "{:012x}",
+        util::fnv1a(runtime.cwd.to_string_lossy().as_bytes()) & 0xffff_ffff_ffff
+    );
     let dir = runtime.home.join("leviathan");
-    (dir.join(format!("{key}.db")), dir.join(format!("{key}.memory.db")))
+    (
+        dir.join(format!("{key}.db")),
+        dir.join(format!("{key}.memory.db")),
+    )
 }
 
-fn local_server(name: &str, bin: &Path, index: Option<&Path>, memory: Option<&Path>, runtime: &Runtime, timeout: Duration) -> Result<McpServer, String> {
+fn local_server(
+    name: &str,
+    bin: &Path,
+    index: Option<&Path>,
+    memory: Option<&Path>,
+    runtime: &Runtime,
+    timeout: Duration,
+) -> Result<McpServer, String> {
     let mut args = Vec::new();
     if let Some(index) = index {
         args.push("--index".to_string());
@@ -471,7 +587,12 @@ fn local_server(name: &str, bin: &Path, index: Option<&Path>, memory: Option<&Pa
         args.push(format!("--memory={}", memory.display()));
     }
     args.push("mcp".into());
-    let command = StdioCommand { command: bin.display().to_string(), args, env: runtime.child_env(), cwd: Some(runtime.cwd.clone()) };
+    let command = StdioCommand {
+        command: bin.display().to_string(),
+        args,
+        env: runtime.child_env(),
+        cwd: Some(runtime.cwd.clone()),
+    };
     McpServer::stdio(name, command, timeout)
 }
 
@@ -481,8 +602,14 @@ pub struct LeviathanPlugin;
 
 impl LeviathanPlugin {
     /// A backend Melchior connects itself; its server stops with the scope.
-    fn owned(ctx: &Context, config: &LeviathanConfig, server: McpServer, label: String) -> Arc<OwnedBackend> {
-        let (tool_ctx, register_tools, namespace) = (ctx.clone(), config.tools, config.namespace.clone());
+    fn owned(
+        ctx: &Context,
+        config: &LeviathanConfig,
+        server: McpServer,
+        label: String,
+    ) -> Arc<OwnedBackend> {
+        let (tool_ctx, register_tools, namespace) =
+            (ctx.clone(), config.tools, config.namespace.clone());
         let backend = Arc::new(OwnedBackend {
             server: Arc::new(server),
             label,
@@ -527,7 +654,14 @@ impl Plugin for LeviathanPlugin {
     }
 
     fn inject(&self) -> &'static [&'static str] {
-        &["runtime", "mcp", "prompt", "turn-hooks", "tools", "leviathan-backends"]
+        &[
+            "runtime",
+            "mcp",
+            "prompt",
+            "turn-hooks",
+            "tools",
+            "leviathan-backends",
+        ]
     }
 
     fn apply(&self, ctx: &Context) -> Result<(), String> {
@@ -547,43 +681,100 @@ impl Plugin for LeviathanPlugin {
                 (None, Some(memory)) => format!("local memory {}", memory.display()),
                 (None, None) => unreachable!("checked above"),
             };
-            let server = local_server("leviathan", &bin, config.index.as_deref(), config.memory.as_deref(), &runtime, config.call_timeout)?;
-            owned = Some(("local", Self::owned(ctx, &config, server, label), config.index.clone()));
+            let server = local_server(
+                "leviathan",
+                &bin,
+                config.index.as_deref(),
+                config.memory.as_deref(),
+                &runtime,
+                config.call_timeout,
+            )?;
+            owned = Some((
+                "local",
+                Self::owned(ctx, &config, server, label),
+                config.index.clone(),
+            ));
         } else if wants("remote")
             && let Some(url) = &config.url
         {
             let base = url.trim_end_matches('/');
-            let endpoint = if base.ends_with("/mcp") { base.to_string() } else { format!("{base}/mcp") };
-            let headers = config.token.iter().map(|t| ("Authorization".to_string(), format!("Bearer {t}"))).collect();
+            let endpoint = if base.ends_with("/mcp") {
+                base.to_string()
+            } else {
+                format!("{base}/mcp")
+            };
+            let headers = config
+                .token
+                .iter()
+                .map(|t| ("Authorization".to_string(), format!("Bearer {t}")))
+                .collect();
             let server = McpServer::http("leviathan", &endpoint, headers, config.call_timeout)?;
-            owned = Some(("remote", Self::owned(ctx, &config, server, format!("remote {url}")), None));
-        } else if config.backend == "auto" && config.auto_start && find_binary(&config.bin).is_some() {
+            owned = Some((
+                "remote",
+                Self::owned(ctx, &config, server, format!("remote {url}")),
+                None,
+            ));
+        } else if config.backend == "auto"
+            && config.auto_start
+            && find_binary(&config.bin).is_some()
+        {
             let (index, memory) = implicit_paths(&runtime);
             if let Some(dir) = index.parent() {
-                std::fs::create_dir_all(dir).map_err(|e| format!("leviathan: cannot create {}: {e}", dir.display()))?;
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| format!("leviathan: cannot create {}: {e}", dir.display()))?;
             }
-            let server = local_server("leviathan", &bin, Some(&index), Some(&memory), &runtime, config.call_timeout)?;
-            let backend = Self::owned(ctx, &config, server, format!("workspace index {}", index.display()));
+            let server = local_server(
+                "leviathan",
+                &bin,
+                Some(&index),
+                Some(&memory),
+                &runtime,
+                config.call_timeout,
+            )?;
+            let backend = Self::owned(
+                ctx,
+                &config,
+                server,
+                format!("workspace index {}", index.display()),
+            );
             leviathan.implicit = Some(backend.clone());
             owned = Some(("implicit", backend, Some(index)));
         } else if config.backend == "auto" {
-            log_debug!("leviathan", "no backend configured and {} is not on PATH", config.bin);
+            log_debug!(
+                "leviathan",
+                "no backend configured and {} is not on PATH",
+                config.bin
+            );
         }
         if let Some((name, backend, _)) = &owned {
             backends.add(ctx, name, Box::new(Shared(backend.clone())))?;
         }
         if backends.get("mcp").is_none() {
             let hub = ctx.inject::<McpHub>("mcp")?;
-            backends.add(ctx, "mcp", Box::new(McpBackend::new(hub, config.server.clone(), config.prefix.clone())))?;
+            backends.add(
+                ctx,
+                "mcp",
+                Box::new(McpBackend::new(
+                    hub,
+                    config.server.clone(),
+                    config.prefix.clone(),
+                )),
+            )?;
         }
-        let indexer = owned.as_ref().and_then(|(_, backend, index)| index.clone().map(|index| (backend.clone(), index)));
-        leviathan.index_tool.store(config.index_tool && indexer.is_some(), Ordering::SeqCst);
+        let indexer = owned
+            .as_ref()
+            .and_then(|(_, backend, index)| index.clone().map(|index| (backend.clone(), index)));
+        leviathan
+            .index_tool
+            .store(config.index_tool && indexer.is_some(), Ordering::SeqCst);
         let leviathan = Arc::new(leviathan);
         ctx.provide("leviathan", leviathan.clone())?;
 
         // The implicit index is Melchior's own; a configured one only while
         // it does not exist yet.
-        let implicit = owned.as_ref().is_some_and(|(name, _, _)| *name == "implicit");
+        let implicit = owned
+            .as_ref()
+            .is_some_and(|(name, _, _)| *name == "implicit");
         let auto = match &indexer {
             Some((backend, index)) if config.auto_index => {
                 let managed = implicit || !index.exists();
@@ -604,7 +795,16 @@ impl Plugin for LeviathanPlugin {
         if let Some((backend, index)) = indexer
             && config.index_tool
         {
-            tools::add(ctx, Box::new(tools::IndexTool { leviathan: leviathan.clone(), backend, bin, index, timeout: config.index_timeout }))?;
+            tools::add(
+                ctx,
+                Box::new(tools::IndexTool {
+                    leviathan: leviathan.clone(),
+                    backend,
+                    bin,
+                    index,
+                    timeout: config.index_timeout,
+                }),
+            )?;
         }
         // A configured backend connects now, so its tools are in the load
         // report; the implicit one waits until nothing else answers.
@@ -612,7 +812,11 @@ impl Plugin for LeviathanPlugin {
             && *name != "implicit"
             && let Err(e) = backend.connect()
         {
-            log_warn!("leviathan", "{}: {e}; will retry before the next turn", backend.label());
+            log_warn!(
+                "leviathan",
+                "{}: {e}; will retry before the next turn",
+                backend.label()
+            );
         }
 
         let hooks = ctx.inject::<TurnHooks>("turn-hooks")?;
@@ -647,11 +851,19 @@ impl Plugin for LeviathanPlugin {
         if config.briefing {
             let prompt = ctx.inject::<PromptService>("prompt")?;
             let source = leviathan.clone();
-            prompt.sections.add(ctx, "leviathan/briefing", Box::new(move |_cx| source.briefing().map(|b| b.text)))?;
+            prompt.sections.add(
+                ctx,
+                "leviathan/briefing",
+                Box::new(move |_cx| source.briefing().map(|b| b.text)),
+            )?;
         }
         if config.recall {
             let source = leviathan.clone();
-            hooks.add(ctx, "leviathan/recall", Box::new(move |cx| source.recall(cx.text)))?;
+            hooks.add(
+                ctx,
+                "leviathan/recall",
+                Box::new(move |cx| source.recall(cx.text)),
+            )?;
         }
         Ok(())
     }

@@ -34,16 +34,32 @@ pub struct ToolOutput {
 
 impl ToolOutput {
     pub fn ok(content: impl Into<String>) -> ToolOutput {
-        ToolOutput { content: content.into(), is_error: false, usage: Json::Null }
+        ToolOutput {
+            content: content.into(),
+            is_error: false,
+            usage: Json::Null,
+        }
     }
     pub fn ok_with_usage(content: impl Into<String>, usage: Json) -> ToolOutput {
-        ToolOutput { content: content.into(), is_error: false, usage }
+        ToolOutput {
+            content: content.into(),
+            is_error: false,
+            usage,
+        }
     }
     pub fn err(content: impl Into<String>) -> ToolOutput {
-        ToolOutput { content: content.into(), is_error: true, usage: Json::Null }
+        ToolOutput {
+            content: content.into(),
+            is_error: true,
+            usage: Json::Null,
+        }
     }
     pub fn err_with_usage(content: impl Into<String>, usage: Json) -> ToolOutput {
-        ToolOutput { content: content.into(), is_error: true, usage }
+        ToolOutput {
+            content: content.into(),
+            is_error: true,
+            usage,
+        }
     }
 }
 
@@ -88,7 +104,11 @@ pub fn definitions(registry: &ToolRegistry, exclude: &[&str]) -> Vec<Json> {
     tools.into_iter().map(|(_, t)| t).collect()
 }
 
-pub fn register(registry: &Arc<ToolRegistry>, ctx: &crate::cordis::Context, tool: Box<dyn Tool>) -> Result<(), String> {
+pub fn register(
+    registry: &Arc<ToolRegistry>,
+    ctx: &crate::cordis::Context,
+    tool: Box<dyn Tool>,
+) -> Result<(), String> {
     let name = tool.spec().name;
     registry.add(ctx, &name, tool)
 }
@@ -96,7 +116,9 @@ pub fn register(registry: &Arc<ToolRegistry>, ctx: &crate::cordis::Context, tool
 // ---- argument helpers ------------------------------------------------------
 
 pub fn str_arg<'a>(args: &'a Json, key: &str) -> Result<&'a str, ToolOutput> {
-    args.get(key).as_str().ok_or_else(|| ToolOutput::err(format!("missing required string argument {key:?}")))
+    args.get(key)
+        .as_str()
+        .ok_or_else(|| ToolOutput::err(format!("missing required string argument {key:?}")))
 }
 
 pub fn opt_str<'a>(args: &'a Json, key: &str) -> Option<&'a str> {

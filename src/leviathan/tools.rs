@@ -45,14 +45,21 @@ pub fn add(ctx: &Context, tool: Box<dyn Tool>) -> Result<(), String> {
 /// Register every tool the server lists that is not registered yet (a
 /// server lists data tools only once an index exists).
 pub fn register_server_tools(ctx: &Context, server: &Arc<McpServer>, namespace: Option<String>) {
-    let Ok(registry) = ctx.inject::<ToolRegistry>("tools") else { return };
+    let Ok(registry) = ctx.inject::<ToolRegistry>("tools") else {
+        return;
+    };
     let listed = server.tools.lock().unwrap().clone();
     for raw in listed {
         let name = public_name(&raw.name);
         if registry.get(&name).is_some() {
             continue;
         }
-        let tool = LeviathanTool { server: server.clone(), raw, name: name.clone(), namespace: namespace.clone() };
+        let tool = LeviathanTool {
+            server: server.clone(),
+            raw,
+            name: name.clone(),
+            namespace: namespace.clone(),
+        };
         if let Err(e) = tools::register(&registry, ctx, Box::new(tool)) {
             log_warn!("leviathan", "{name}: {e}");
         }
@@ -69,7 +76,11 @@ pub struct LeviathanTool {
 
 impl Tool for LeviathanTool {
     fn spec(&self) -> ToolSpec {
-        ToolSpec { name: self.name.clone(), description: self.raw.description.clone(), parameters: self.raw.input_schema.clone() }
+        ToolSpec {
+            name: self.name.clone(),
+            description: self.raw.description.clone(),
+            parameters: self.raw.input_schema.clone(),
+        }
     }
 
     fn call(&self, _cx: &ToolCx<'_>, args: &Json) -> ToolOutput {
@@ -111,7 +122,11 @@ const MULTI: &[(&str, &str)] = &[
 fn strings(value: &Json) -> Vec<String> {
     match value {
         Json::Str(s) => vec![s.clone()],
-        other => other.items().iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+        other => other
+            .items()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
     }
 }
 
@@ -202,9 +217,15 @@ impl Tool for IndexTool {
         // caches what it described; restart it and drop the briefing.
         self.leviathan.invalidate();
         if let Err(e) = self.backend.connect() {
-            return ToolOutput::err(format!("indexed, but Leviathan did not restart: {e}\n{text}"));
+            return ToolOutput::err(format!(
+                "indexed, but Leviathan did not restart: {e}\n{text}"
+            ));
         }
-        let records = self.leviathan.briefing().map(|b| b.record_count).unwrap_or(0);
+        let records = self
+            .leviathan
+            .briefing()
+            .map(|b| b.record_count)
+            .unwrap_or(0);
         ToolOutput::ok(format!(
             "{text}\n\nIndexed in {:.1}s; {records} records are searchable now with leviathan_search.",
             started.elapsed().as_secs_f64()
@@ -231,7 +252,12 @@ pub(super) fn run(mut command: Command, timeout: Duration) -> Result<(bool, Stri
     let child = crate::proc::track(child);
     let deadline = Instant::now() + timeout;
     let status = loop {
-        if let Some(status) = child.lock().unwrap().try_wait().map_err(|e| e.to_string())? {
+        if let Some(status) = child
+            .lock()
+            .unwrap()
+            .try_wait()
+            .map_err(|e| e.to_string())?
+        {
             break status;
         }
         if Instant::now() > deadline {
@@ -268,7 +294,10 @@ mod tests {
     #[test]
     fn index_arguments_accept_strings_or_lists() {
         assert_eq!(strings(&Json::from("a")), vec!["a".to_string()]);
-        assert_eq!(strings(&crate::jarr!["a", "b"]), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            strings(&crate::jarr!["a", "b"]),
+            vec!["a".to_string(), "b".to_string()]
+        );
         assert!(strings(&Json::Null).is_empty());
     }
 }

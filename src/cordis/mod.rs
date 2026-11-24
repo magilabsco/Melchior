@@ -103,7 +103,10 @@ impl App {
     /// The root context. Services provided here live for the whole process.
     pub fn root(&self) -> Context {
         let scope = self.new_scope("root", "root", Json::obj(), Vec::new());
-        Context { app: self.clone(), scope }
+        Context {
+            app: self.clone(),
+            scope,
+        }
     }
 
     fn new_scope(&self, name: &str, entry: &str, config: Json, injects: Vec<String>) -> Arc<Scope> {
@@ -125,18 +128,38 @@ impl App {
     }
 
     pub fn get<T: Send + Sync + 'static>(&self, name: &str) -> Option<Arc<T>> {
-        let value = self.inner.services.read().unwrap().get(name).map(|slot| slot.value.clone())?;
+        let value = self
+            .inner
+            .services
+            .read()
+            .unwrap()
+            .get(name)
+            .map(|slot| slot.value.clone())?;
         value.downcast::<T>().ok()
     }
 
     pub fn service_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.inner.services.read().unwrap().keys().cloned().collect();
+        let mut names: Vec<String> = self
+            .inner
+            .services
+            .read()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
         names.sort();
         names
     }
 
     pub fn active_scopes(&self) -> Vec<Arc<Scope>> {
-        self.inner.scopes.lock().unwrap().iter().filter(|s| s.is_active()).cloned().collect()
+        self.inner
+            .scopes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.is_active())
+            .cloned()
+            .collect()
     }
 
     pub fn emit(&self, event: &str, payload: &Json) {
@@ -167,15 +190,26 @@ impl App {
         }
         let withdrawn: Vec<String> = {
             let mut services = self.inner.services.write().unwrap();
-            let names: Vec<String> =
-                services.iter().filter(|(_, slot)| slot.owner == scope.id).map(|(name, _)| name.clone()).collect();
+            let names: Vec<String> = services
+                .iter()
+                .filter(|(_, slot)| slot.owner == scope.id)
+                .map(|(name, _)| name.clone())
+                .collect();
             for name in &names {
                 services.remove(name);
             }
             names
         };
-        self.inner.listeners.write().unwrap().retain(|l| l.owner != scope.id);
-        self.inner.scopes.lock().unwrap().retain(|s| s.id != scope.id);
+        self.inner
+            .listeners
+            .write()
+            .unwrap()
+            .retain(|l| l.owner != scope.id);
+        self.inner
+            .scopes
+            .lock()
+            .unwrap()
+            .retain(|s| s.id != scope.id);
         if !withdrawn.is_empty() {
             let dependents: Vec<Arc<Scope>> = self
                 .inner
@@ -187,7 +221,11 @@ impl App {
                 .cloned()
                 .collect();
             for dependent in dependents {
-                crate::log_info!("cordis", "disposing {} after its dependency was withdrawn", dependent.name);
+                crate::log_info!(
+                    "cordis",
+                    "disposing {} after its dependency was withdrawn",
+                    dependent.name
+                );
                 self.dispose(&dependent);
             }
         }
@@ -229,12 +267,22 @@ impl Context {
     }
 
     /// Publish a service owned by this scope.
-    pub fn provide<T: Send + Sync + 'static>(&self, name: &str, value: Arc<T>) -> Result<(), String> {
+    pub fn provide<T: Send + Sync + 'static>(
+        &self,
+        name: &str,
+        value: Arc<T>,
+    ) -> Result<(), String> {
         let mut services = self.app.inner.services.write().unwrap();
         if services.contains_key(name) {
             return Err(format!("service {name:?} is already provided"));
         }
-        services.insert(name.to_string(), ServiceSlot { value, owner: self.scope.id });
+        services.insert(
+            name.to_string(),
+            ServiceSlot {
+                value,
+                owner: self.scope.id,
+            },
+        );
         Ok(())
     }
 
@@ -243,13 +291,22 @@ impl Context {
     }
 
     pub fn inject<T: Send + Sync + 'static>(&self, name: &str) -> Result<Arc<T>, String> {
-        self.get(name).ok_or_else(|| format!("{}: required service {name:?} is not available", self.scope.name))
+        self.get(name).ok_or_else(|| {
+            format!(
+                "{}: required service {name:?} is not available",
+                self.scope.name
+            )
+        })
     }
 
     /// Register cleanup that runs when this scope is disposed.
     pub fn effect(&self, dispose: impl FnOnce() + Send + 'static) {
         if self.scope.is_active() {
-            self.scope.disposables.lock().unwrap().push(Box::new(dispose));
+            self.scope
+                .disposables
+                .lock()
+                .unwrap()
+                .push(Box::new(dispose));
         } else {
             dispose();
         }
@@ -268,15 +325,26 @@ impl Context {
     }
 
     /// Run a plugin in a child scope that is disposed with this one.
-    pub fn plugin(&self, plugin: &dyn Plugin, entry: &str, config: Json) -> Result<Context, String> {
+    pub fn plugin(
+        &self,
+        plugin: &dyn Plugin,
+        entry: &str,
+        config: Json,
+    ) -> Result<Context, String> {
         for name in plugin.inject() {
             if !self.app.has_service(name) {
-                return Err(format!("{}: required service {name:?} is not available", plugin.name()));
+                return Err(format!(
+                    "{}: required service {name:?} is not available",
+                    plugin.name()
+                ));
             }
         }
         let injects = plugin.inject().iter().map(|s| s.to_string()).collect();
         let scope = self.app.new_scope(plugin.name(), entry, config, injects);
-        let child = Context { app: self.app.clone(), scope: scope.clone() };
+        let child = Context {
+            app: self.app.clone(),
+            scope: scope.clone(),
+        };
         if let Err(error) = plugin.apply(&child) {
             self.app.dispose(&scope);
             return Err(error);
@@ -311,7 +379,10 @@ impl<T: Send + Sync + 'static> Default for Registry<T> {
 
 impl<T: Send + Sync + 'static> Registry<T> {
     pub fn new() -> Self {
-        Registry { items: Mutex::new(Vec::new()), next: AtomicU64::new(1) }
+        Registry {
+            items: Mutex::new(Vec::new()),
+            next: AtomicU64::new(1),
+        }
     }
 
     pub fn add(self: &Arc<Self>, ctx: &Context, key: &str, item: T) -> Result<(), String> {
@@ -332,11 +403,21 @@ impl<T: Send + Sync + 'static> Registry<T> {
     }
 
     pub fn get(&self, key: &str) -> Option<Arc<T>> {
-        self.items.lock().unwrap().iter().find(|(_, k, _)| k == key).map(|(_, _, v)| v.clone())
+        self.items
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, k, _)| k == key)
+            .map(|(_, _, v)| v.clone())
     }
 
     pub fn all(&self) -> Vec<(String, Arc<T>)> {
-        self.items.lock().unwrap().iter().map(|(_, k, v)| (k.clone(), v.clone())).collect()
+        self.items
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -388,7 +469,9 @@ mod tests {
         let root = app.root();
         let disposed = Arc::new(AtomicUsize::new(0));
         let provider = root.plugin(&Provider, "p", Json::obj()).unwrap();
-        let consumer = root.plugin(&Consumer(disposed.clone()), "c", Json::obj()).unwrap();
+        let consumer = root
+            .plugin(&Consumer(disposed.clone()), "c", Json::obj())
+            .unwrap();
         assert!(consumer.scope().is_active());
         provider.dispose();
         assert!(!app.has_service("greeting"));
@@ -400,7 +483,10 @@ mod tests {
     fn missing_injection_is_refused_and_registry_entries_are_scoped() {
         let app = App::new();
         let root = app.root();
-        assert!(root.plugin(&Consumer(Arc::new(AtomicUsize::new(0))), "c", Json::obj()).is_err());
+        assert!(
+            root.plugin(&Consumer(Arc::new(AtomicUsize::new(0))), "c", Json::obj())
+                .is_err()
+        );
         let registry: Arc<Registry<u32>> = Arc::new(Registry::new());
         let provider = root.plugin(&Provider, "p", Json::obj()).unwrap();
         registry.add(&provider, "one", 1).unwrap();

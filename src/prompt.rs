@@ -26,7 +26,10 @@ pub struct PromptService {
 
 impl Default for PromptService {
     fn default() -> Self {
-        PromptService { persona: Mutex::new(String::new()), sections: Arc::new(Registry::new()) }
+        PromptService {
+            persona: Mutex::new(String::new()),
+            sections: Arc::new(Registry::new()),
+        }
     }
 }
 

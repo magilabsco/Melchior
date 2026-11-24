@@ -32,7 +32,11 @@ impl Json {
 
     pub fn get(&self, key: &str) -> &Json {
         match self {
-            Json::Obj(fields) => fields.iter().find(|(k, _)| k == key).map(|(_, v)| v).unwrap_or(&NULL),
+            Json::Obj(fields) => fields
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v)
+                .unwrap_or(&NULL),
             _ => &NULL,
         }
     }
@@ -74,9 +78,10 @@ impl Json {
 
     pub fn remove(&mut self, key: &str) -> Option<Json> {
         if let Json::Obj(fields) = self
-            && let Some(pos) = fields.iter().position(|(k, _)| k == key) {
-                return Some(fields.remove(pos).1);
-            }
+            && let Some(pos) = fields.iter().position(|(k, _)| k == key)
+        {
+            return Some(fields.remove(pos).1);
+        }
         None
     }
 
@@ -354,7 +359,11 @@ impl std::fmt::Display for ParseError {
 const MAX_DEPTH: usize = 256;
 
 pub fn parse(input: &str) -> Result<Json, ParseError> {
-    let mut parser = Parser { bytes: input.as_bytes(), src: input, pos: 0 };
+    let mut parser = Parser {
+        bytes: input.as_bytes(),
+        src: input,
+        pos: 0,
+    };
     parser.skip_ws();
     let value = parser.value(0)?;
     parser.skip_ws();
@@ -372,7 +381,10 @@ struct Parser<'a> {
 
 impl Parser<'_> {
     fn error(&self, message: &str) -> ParseError {
-        ParseError { message: message.to_string(), offset: self.pos }
+        ParseError {
+            message: message.to_string(),
+            offset: self.pos,
+        }
     }
 
     fn skip_ws(&mut self) {
@@ -507,16 +519,21 @@ impl Parser<'_> {
             }
         }
         let text = &self.src[start..self.pos];
-        if !float
-            && let Ok(i) = text.parse::<i64>() {
-                return Ok(Json::Int(i));
-            }
-        text.parse::<f64>().map(Json::Float).map_err(|_| self.error("invalid number"))
+        if !float && let Ok(i) = text.parse::<i64>() {
+            return Ok(Json::Int(i));
+        }
+        text.parse::<f64>()
+            .map(Json::Float)
+            .map_err(|_| self.error("invalid number"))
     }
 
     fn hex4(&mut self) -> Result<u32, ParseError> {
-        let chunk = self.src.get(self.pos..self.pos + 4).ok_or_else(|| self.error("short unicode escape"))?;
-        let code = u32::from_str_radix(chunk, 16).map_err(|_| self.error("invalid unicode escape"))?;
+        let chunk = self
+            .src
+            .get(self.pos..self.pos + 4)
+            .ok_or_else(|| self.error("short unicode escape"))?;
+        let code =
+            u32::from_str_radix(chunk, 16).map_err(|_| self.error("invalid unicode escape"))?;
         self.pos += 4;
         Ok(code)
     }
@@ -541,7 +558,10 @@ impl Parser<'_> {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
-                    let escape = *self.bytes.get(self.pos).ok_or_else(|| self.error("bad escape"))?;
+                    let escape = *self
+                        .bytes
+                        .get(self.pos)
+                        .ok_or_else(|| self.error("bad escape"))?;
                     self.pos += 1;
                     match escape {
                         b'"' => out.push('"'),

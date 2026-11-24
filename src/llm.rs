@@ -59,8 +59,12 @@ pub enum Delta<'a> {
 
 pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
-    fn chat(&self, request: &ChatRequest<'_>, on_delta: &mut dyn FnMut(Delta<'_>), cancel: &AtomicBool)
-    -> Result<ChatOutput, LlmError>;
+    fn chat(
+        &self,
+        request: &ChatRequest<'_>,
+        on_delta: &mut dyn FnMut(Delta<'_>),
+        cancel: &AtomicBool,
+    ) -> Result<ChatOutput, LlmError>;
     fn describe(&self) -> Json;
 }
 
@@ -79,7 +83,12 @@ pub struct OpenAiCompatible {
 }
 
 impl OpenAiCompatible {
-    pub fn from_config(id: &str, config: &Json, fallback_base: &str, fallback_key_env: &str) -> OpenAiCompatible {
+    pub fn from_config(
+        id: &str,
+        config: &Json,
+        fallback_base: &str,
+        fallback_key_env: &str,
+    ) -> OpenAiCompatible {
         let headers = config
             .get("headers")
             .entries()
@@ -90,7 +99,11 @@ impl OpenAiCompatible {
             .get("models")
             .items()
             .iter()
-            .filter_map(|m| m.as_str().or_else(|| m.get("id").as_str()).map(str::to_string))
+            .filter_map(|m| {
+                m.as_str()
+                    .or_else(|| m.get("id").as_str())
+                    .map(str::to_string)
+            })
             .collect();
         OpenAiCompatible {
             id: id.to_string(),
@@ -107,15 +120,27 @@ impl OpenAiCompatible {
             headers,
             models,
             max_attempts: config.get("maxAttempts").as_i64().unwrap_or(3).clamp(1, 6) as u32,
-            read_timeout: Duration::from_secs(config.get("idleTimeoutSeconds").as_i64().unwrap_or(180).max(5) as u64),
-            total_timeout: Duration::from_secs(config.get("timeoutSeconds").as_i64().unwrap_or(600).max(10) as u64),
+            read_timeout: Duration::from_secs(
+                config
+                    .get("idleTimeoutSeconds")
+                    .as_i64()
+                    .unwrap_or(180)
+                    .max(5) as u64,
+            ),
+            total_timeout: Duration::from_secs(
+                config.get("timeoutSeconds").as_i64().unwrap_or(600).max(10) as u64,
+            ),
         }
     }
 
     fn key(&self) -> Option<String> {
         self.api_key
             .clone()
-            .or_else(|| self.api_key_env.as_ref().and_then(|name| std::env::var(name).ok()))
+            .or_else(|| {
+                self.api_key_env
+                    .as_ref()
+                    .and_then(|name| std::env::var(name).ok())
+            })
             .filter(|k| !k.trim().is_empty())
     }
 
@@ -175,8 +200,15 @@ impl OpenAiCompatible {
         }
         if self.base_url.contains("openrouter.ai") {
             // OpenRouter's app attribution; a provider's `headers` replace it.
-            for (name, value) in [("HTTP-Referer", "https://github.com/magilabsco/Melchior"), ("X-Title", "Melchior")] {
-                if !self.headers.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)) {
+            for (name, value) in [
+                ("HTTP-Referer", "https://github.com/magilabsco/Melchior"),
+                ("X-Title", "Melchior"),
+            ] {
+                if !self
+                    .headers
+                    .iter()
+                    .any(|(n, _)| n.eq_ignore_ascii_case(name))
+                {
                     request = request.header(name, value);
                 }
             }
@@ -184,8 +216,15 @@ impl OpenAiCompatible {
         for (name, value) in &self.headers {
             request = request.header(name, value);
         }
-        let response = http::send(&request)
-            .map_err(|e| (LlmError { message: format!("model request failed: {e}"), retryable: e.retryable }, None))?;
+        let response = http::send(&request).map_err(|e| {
+            (
+                LlmError {
+                    message: format!("model request failed: {e}"),
+                    retryable: e.retryable,
+                },
+                None,
+            )
+        })?;
         if response.status >= 400 {
             let status = response.status;
             let retry_after = response
@@ -208,11 +247,28 @@ impl OpenAiCompatible {
             };
             return Err((LlmError { message, retryable }, retry_after));
         }
-        let streaming = response.header("content-type").map(|v| v.contains("event-stream")).unwrap_or(false);
+        let streaming = response
+            .header("content-type")
+            .map(|v| v.contains("event-stream"))
+            .unwrap_or(false);
         if !streaming {
-            let text = response.text(16 * 1024 * 1024).map_err(|e| (LlmError { message: e.message, retryable: true }, None))?;
+            let text = response.text(16 * 1024 * 1024).map_err(|e| {
+                (
+                    LlmError {
+                        message: e.message,
+                        retryable: true,
+                    },
+                    None,
+                )
+            })?;
             let value = json::parse(&text).map_err(|e| {
-                (LlmError { message: format!("model provider returned invalid JSON: {e}"), retryable: true }, None)
+                (
+                    LlmError {
+                        message: format!("model provider returned invalid JSON: {e}"),
+                        retryable: true,
+                    },
+                    None,
+                )
             })?;
             return parse_complete(&value).map_err(|e| (e, None));
         }
@@ -222,11 +278,23 @@ impl OpenAiCompatible {
         let mut line = String::new();
         loop {
             if cancel.load(Ordering::SeqCst) {
-                return Err((LlmError { message: "cancelled".into(), retryable: false }, None));
+                return Err((
+                    LlmError {
+                        message: "cancelled".into(),
+                        retryable: false,
+                    },
+                    None,
+                ));
             }
             line.clear();
             let n = body.read_line(&mut line).map_err(|e| {
-                (LlmError { message: format!("model stream interrupted: {e}"), retryable: true }, None)
+                (
+                    LlmError {
+                        message: format!("model stream interrupted: {e}"),
+                        retryable: true,
+                    },
+                    None,
+                )
             })?;
             if n == 0 {
                 if !data.is_empty() {
@@ -256,7 +324,13 @@ impl OpenAiCompatible {
             }
         }
         if !assembler.saw_any {
-            return Err((LlmError { message: "model stream ended without any data".into(), retryable: true }, None));
+            return Err((
+                LlmError {
+                    message: "model stream ended without any data".into(),
+                    retryable: true,
+                },
+                None,
+            ));
         }
         Ok(assembler.finish())
     }
@@ -284,7 +358,10 @@ impl Provider for OpenAiCompatible {
     ) -> Result<ChatOutput, LlmError> {
         // Local model servers commonly run without a key.
         if self.key().is_none() && !is_loopback(&self.base_url) {
-            return Err(LlmError { message: self.missing_key(), retryable: false });
+            return Err(LlmError {
+                message: self.missing_key(),
+                retryable: false,
+            });
         }
         let body = self.body(request);
         let mut attempt = 0;
@@ -293,11 +370,19 @@ impl Provider for OpenAiCompatible {
             match self.attempt(&body, on_delta, cancel) {
                 Ok(output) => return Ok(output),
                 Err((error, retry_after)) => {
-                    if !error.retryable || attempt >= self.max_attempts || cancel.load(Ordering::SeqCst) {
+                    if !error.retryable
+                        || attempt >= self.max_attempts
+                        || cancel.load(Ordering::SeqCst)
+                    {
                         return Err(error);
                     }
-                    let wait = retry_after.unwrap_or(Duration::from_millis(800 * 3u64.pow(attempt - 1)));
-                    crate::log_warn!("llm", "{} attempt {attempt} failed ({error}); retrying in {wait:?}", self.id);
+                    let wait =
+                        retry_after.unwrap_or(Duration::from_millis(800 * 3u64.pow(attempt - 1)));
+                    crate::log_warn!(
+                        "llm",
+                        "{} attempt {attempt} failed ({error}); retrying in {wait:?}",
+                        self.id
+                    );
                     on_delta(Delta::Retry(attempt, &error.message));
                     std::thread::sleep(wait);
                 }
@@ -331,15 +416,22 @@ impl Assembler {
         if data.trim() == "[DONE]" {
             return Ok(true);
         }
-        let chunk = json::parse(data)
-            .map_err(|e| LlmError { message: format!("model stream sent invalid JSON: {e}"), retryable: true })?;
+        let chunk = json::parse(data).map_err(|e| LlmError {
+            message: format!("model stream sent invalid JSON: {e}"),
+            retryable: true,
+        })?;
         self.saw_any = true;
         if !chunk.get("error").is_null() {
             let error = chunk.get("error");
             let code = error.get("code").as_i64().unwrap_or(0);
             return Err(LlmError {
-                message: format!("model provider error: {}", error.get("message").str_or("unknown error")),
-                retryable: code == 429 || code >= 500 || self.text.is_empty() && self.calls.is_empty(),
+                message: format!(
+                    "model provider error: {}",
+                    error.get("message").str_or("unknown error")
+                ),
+                retryable: code == 429
+                    || code >= 500
+                    || self.text.is_empty() && self.calls.is_empty(),
             });
         }
         if let Some(model) = chunk.get("model").as_str() {
@@ -351,29 +443,39 @@ impl Assembler {
         let choice = chunk.get("choices").at(0);
         let delta = choice.get("delta");
         if let Some(text) = delta.get("content").as_str()
-            && !text.is_empty() {
-                self.text.push_str(text);
-                on_delta(Delta::Text(text));
-            }
-        let reasoning = delta.get("reasoning").as_str().or_else(|| delta.get("reasoning_content").as_str());
+            && !text.is_empty()
+        {
+            self.text.push_str(text);
+            on_delta(Delta::Text(text));
+        }
+        let reasoning = delta
+            .get("reasoning")
+            .as_str()
+            .or_else(|| delta.get("reasoning_content").as_str());
         if let Some(reasoning) = reasoning
-            && !reasoning.is_empty() {
-                self.reasoning.push_str(reasoning);
-                on_delta(Delta::Reasoning(reasoning));
-            }
+            && !reasoning.is_empty()
+        {
+            self.reasoning.push_str(reasoning);
+            on_delta(Delta::Reasoning(reasoning));
+        }
         for detail in delta.get("reasoning_details").items() {
             self.merge_detail(detail);
         }
         for call in delta.get("tool_calls").items() {
-            let index = call.get("index").as_i64().unwrap_or(self.calls.len() as i64).max(0) as usize;
+            let index = call
+                .get("index")
+                .as_i64()
+                .unwrap_or(self.calls.len() as i64)
+                .max(0) as usize;
             while self.calls.len() <= index {
                 self.calls.push(PartialCall::default());
             }
             let slot = &mut self.calls[index];
             if let Some(id) = call.get("id").as_str()
-                && !id.is_empty() {
-                    slot.id = id.to_string();
-                }
+                && !id.is_empty()
+            {
+                slot.id = id.to_string();
+            }
             let function = call.get("function");
             if let Some(name) = function.get("name").as_str() {
                 slot.name.push_str(name);
@@ -392,7 +494,11 @@ impl Assembler {
     /// text-bearing fields are concatenated, everything else is kept as sent.
     fn merge_detail(&mut self, detail: &Json) {
         let index = detail.get("index").as_i64();
-        let existing = index.and_then(|i| self.details.iter_mut().find(|d| d.get("index").as_i64() == Some(i)));
+        let existing = index.and_then(|i| {
+            self.details
+                .iter_mut()
+                .find(|d| d.get("index").as_i64() == Some(i))
+        });
         match existing {
             Some(current) => {
                 for (key, value) in detail.entries() {
@@ -418,7 +524,11 @@ impl Assembler {
             .into_iter()
             .filter(|c| !c.name.is_empty())
             .map(|c| ToolCall {
-                id: if c.id.is_empty() { crate::util::new_id("call") } else { c.id },
+                id: if c.id.is_empty() {
+                    crate::util::new_id("call")
+                } else {
+                    c.id
+                },
                 name: c.name,
                 arguments: c.arguments,
             })
@@ -438,7 +548,10 @@ impl Assembler {
 fn parse_complete(value: &Json) -> Result<ChatOutput, LlmError> {
     if !value.get("error").is_null() {
         return Err(LlmError {
-            message: format!("model provider error: {}", value.get("error").get("message").str_or("unknown error")),
+            message: format!(
+                "model provider error: {}",
+                value.get("error").get("message").str_or("unknown error")
+            ),
             retryable: false,
         });
     }
@@ -446,14 +559,23 @@ fn parse_complete(value: &Json) -> Result<ChatOutput, LlmError> {
     let message = choice.get("message");
     Ok(ChatOutput {
         text: message.get("content").str_or("").to_string(),
-        reasoning: message.get("reasoning").as_str().or_else(|| message.get("reasoning_content").as_str()).unwrap_or("").into(),
+        reasoning: message
+            .get("reasoning")
+            .as_str()
+            .or_else(|| message.get("reasoning_content").as_str())
+            .unwrap_or("")
+            .into(),
         reasoning_details: message.get("reasoning_details").items().to_vec(),
         tool_calls: message
             .get("tool_calls")
             .items()
             .iter()
             .map(|c| ToolCall {
-                id: c.get("id").as_str().map(str::to_string).unwrap_or_else(|| crate::util::new_id("call")),
+                id: c
+                    .get("id")
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| crate::util::new_id("call")),
                 name: c.get("function").get("name").str_or("").to_string(),
                 arguments: c.get("function").get("arguments").str_or("").to_string(),
             })
@@ -469,8 +591,15 @@ fn is_loopback(url: &str) -> bool {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let host = rest.split(['/', '?']).next().unwrap_or("");
     let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
-    let host = if host.starts_with('[') { host.split(']').next().unwrap_or("").trim_start_matches('[') } else { host.split(':').next().unwrap_or("") };
-    host.eq_ignore_ascii_case("localhost") || host == "::1" || host.starts_with("127.") || host == "0.0.0.0"
+    let host = if host.starts_with('[') {
+        host.split(']').next().unwrap_or("").trim_start_matches('[')
+    } else {
+        host.split(':').next().unwrap_or("")
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host == "::1"
+        || host.starts_with("127.")
+        || host == "0.0.0.0"
 }
 
 /// Pick the provider for `initialize({provider})`.
@@ -505,7 +634,10 @@ mod tests {
         let output = assembler.finish();
         assert_eq!(seen, "Hi ");
         assert_eq!(output.tool_calls[0].arguments, "{\"a\":1}");
-        assert_eq!(output.reasoning_details[0].get("text").as_str(), Some("think more"));
+        assert_eq!(
+            output.reasoning_details[0].get("text").as_str(),
+            Some("think more")
+        );
         assert_eq!(output.finish_reason, "tool_calls");
         assert_eq!(output.usage.get("total_tokens").as_i64(), Some(12));
     }
@@ -513,22 +645,58 @@ mod tests {
     #[test]
     fn a_missing_key_fails_before_any_request_and_says_what_to_set() {
         let env = "MELCHIOR_TEST_UNSET_KEY";
-        let provider = OpenAiCompatible::from_config("openrouter", &jobj! { "apiKeyEnv" => env }, "https://openrouter.ai/api/v1", "X");
-        let request = ChatRequest { model: "m", messages: &[], tools: &[], tool_choice: None, max_tokens: None, reasoning_effort: None };
-        let error = provider.chat(&request, &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        let provider = OpenAiCompatible::from_config(
+            "openrouter",
+            &jobj! { "apiKeyEnv" => env },
+            "https://openrouter.ai/api/v1",
+            "X",
+        );
+        let request = ChatRequest {
+            model: "m",
+            messages: &[],
+            tools: &[],
+            tool_choice: None,
+            max_tokens: None,
+            reasoning_effort: None,
+        };
+        let error = provider
+            .chat(&request, &mut |_| {}, &AtomicBool::new(false))
+            .unwrap_err();
         assert!(!error.retryable);
-        assert!(error.message.contains(&format!("set {env} to an OpenRouter key")), "{}", error.message);
+        assert!(
+            error
+                .message
+                .contains(&format!("set {env} to an OpenRouter key")),
+            "{}",
+            error.message
+        );
 
-        let other = OpenAiCompatible::from_config("p", &jobj! { "apiKeyEnv" => env }, "https://api.example.com/v1", "X");
-        assert!(other.missing_key().contains(&format!("set {env} to a key for https://api.example.com/v1")));
+        let other = OpenAiCompatible::from_config(
+            "p",
+            &jobj! { "apiKeyEnv" => env },
+            "https://api.example.com/v1",
+            "X",
+        );
+        assert!(other.missing_key().contains(&format!(
+            "set {env} to a key for https://api.example.com/v1"
+        )));
     }
 
     #[test]
     fn local_model_servers_need_no_key() {
-        for url in ["http://localhost:11434/v1", "http://127.0.0.1:8080", "http://[::1]:8000/v1", "http://0.0.0.0:1234"] {
+        for url in [
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:8080",
+            "http://[::1]:8000/v1",
+            "http://0.0.0.0:1234",
+        ] {
             assert!(is_loopback(url), "{url}");
         }
-        for url in ["https://openrouter.ai/api/v1", "https://localhost.example.com/v1", "http://10.0.0.5:8000"] {
+        for url in [
+            "https://openrouter.ai/api/v1",
+            "https://localhost.example.com/v1",
+            "http://10.0.0.5:8000",
+        ] {
             assert!(!is_loopback(url), "{url}");
         }
     }

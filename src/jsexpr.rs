@@ -47,9 +47,11 @@ impl Val {
             Val::Json(Json::Int(i)) => i.to_string(),
             Val::Json(Json::Float(f)) => f.to_string(),
             Val::Json(Json::Bool(b)) => b.to_string(),
-            Val::Json(Json::Arr(items)) => {
-                items.iter().map(|i| Val::Json(i.clone()).to_js_string()).collect::<Vec<_>>().join(",")
-            }
+            Val::Json(Json::Arr(items)) => items
+                .iter()
+                .map(|i| Val::Json(i.clone()).to_js_string())
+                .collect::<Vec<_>>()
+                .join(","),
             Val::Json(Json::Obj(_)) => "[object Object]".into(),
         }
     }
@@ -63,7 +65,11 @@ impl Val {
 }
 
 pub fn eval(source: &str, env: &dyn Fn(&str) -> Option<String>) -> Result<Json, String> {
-    let mut parser = Parser { src: source, pos: 0, env };
+    let mut parser = Parser {
+        src: source,
+        pos: 0,
+        env,
+    };
     let value = parser.expr(0)?;
     parser.ws();
     if parser.pos != source.len() {
@@ -225,7 +231,9 @@ impl Parser<'_> {
                         if matches!(self.peek(), Some('.' | '[' | '(')) {
                             return Err(self.unsupported());
                         }
-                        Ok((self.env)(&key).map(|v| Val::Json(Json::Str(v))).unwrap_or(Val::Undefined))
+                        Ok((self.env)(&key)
+                            .map(|v| Val::Json(Json::Str(v)))
+                            .unwrap_or(Val::Undefined))
                     }
                     _ => {
                         self.pos = start;
@@ -261,14 +269,17 @@ impl Parser<'_> {
         if self.peek() == Some('-') {
             self.pos += 1;
         }
-        while matches!(self.peek(), Some(c) if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E') {
+        while matches!(self.peek(), Some(c) if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E')
+        {
             self.pos += 1;
         }
         let text = &self.src[start..self.pos];
         if let Ok(i) = text.parse::<i64>() {
             return Ok(Val::Json(Json::Int(i)));
         }
-        text.parse::<f64>().map(|f| Val::Json(Json::Float(f))).map_err(|_| self.unsupported())
+        text.parse::<f64>()
+            .map(|f| Val::Json(Json::Float(f)))
+            .map_err(|_| self.unsupported())
     }
 
     fn escape(&mut self, out: &mut String) -> Result<(), String> {
@@ -280,7 +291,10 @@ impl Parser<'_> {
             'r' => out.push('\r'),
             '0' => out.push('\0'),
             'u' => {
-                let hex = self.src.get(self.pos..self.pos + 4).ok_or_else(|| self.unsupported())?;
+                let hex = self
+                    .src
+                    .get(self.pos..self.pos + 4)
+                    .ok_or_else(|| self.unsupported())?;
                 let code = u32::from_str_radix(hex, 16).map_err(|_| self.unsupported())?;
                 self.pos += 4;
                 out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
@@ -345,14 +359,28 @@ mod tests {
 
     #[test]
     fn evaluates_typical_patch_expressions() {
-        assert_eq!(eval("process.env.MODEL", &env).unwrap(), Json::Str("deepseek/v4".into()));
-        assert_eq!(eval("`Bearer ${process.env.TOKEN}`", &env).unwrap(), Json::Str("Bearer s3cret".into()));
         assert_eq!(
-            eval("[{ id: process.env.MODEL }]", &env).unwrap().to_string(),
+            eval("process.env.MODEL", &env).unwrap(),
+            Json::Str("deepseek/v4".into())
+        );
+        assert_eq!(
+            eval("`Bearer ${process.env.TOKEN}`", &env).unwrap(),
+            Json::Str("Bearer s3cret".into())
+        );
+        assert_eq!(
+            eval("[{ id: process.env.MODEL }]", &env)
+                .unwrap()
+                .to_string(),
             r#"[{"id":"deepseek/v4"}]"#
         );
-        assert_eq!(eval("process.env.MISSING || 'fallback'", &env).unwrap(), Json::Str("fallback".into()));
-        assert_eq!(eval("process.env['TOKEN'] ?? 'x'", &env).unwrap(), Json::Str("s3cret".into()));
+        assert_eq!(
+            eval("process.env.MISSING || 'fallback'", &env).unwrap(),
+            Json::Str("fallback".into())
+        );
+        assert_eq!(
+            eval("process.env['TOKEN'] ?? 'x'", &env).unwrap(),
+            Json::Str("s3cret".into())
+        );
         assert_eq!(eval("process.env.MISSING", &env).unwrap(), Json::Null);
     }
 

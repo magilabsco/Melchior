@@ -1,11 +1,14 @@
 //! Small std-only helpers: time formatting, random ids, hashing, logging.
 
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn unix_millis() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64
 }
 
 /// RFC 3339 UTC timestamp with millisecond precision.
@@ -42,13 +45,35 @@ pub fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 pub fn today_long() -> String {
     const MONTHS: [&str; 12] = [
-        "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
-        "November", "December",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ];
-    const DAYS: [&str; 7] = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
+    const DAYS: [&str; 7] = [
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+    ];
     let days = (unix_millis() / 1000 / 86_400) as i64;
     let (year, month, day) = civil_from_days(days);
-    format!("{}, {} {day}, {year}", DAYS[(days % 7) as usize], MONTHS[(month - 1) as usize])
+    format!(
+        "{}, {} {day}, {year}",
+        DAYS[(days % 7) as usize],
+        MONTHS[(month - 1) as usize]
+    )
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -56,9 +81,13 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 /// 128 random bits as hex, from the kernel CSPRNG with a time/counter fallback.
 pub fn random_hex(bytes: usize) -> String {
     let mut buf = vec![0u8; bytes];
-    let filled = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut buf)).is_ok();
+    let filled = std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .is_ok();
     if !filled {
-        let mut seed = unix_millis() ^ (std::process::id() as u64) << 32 ^ COUNTER.fetch_add(1, Ordering::Relaxed);
+        let mut seed = unix_millis()
+            ^ (std::process::id() as u64) << 32
+            ^ COUNTER.fetch_add(1, Ordering::Relaxed);
         for byte in &mut buf {
             seed ^= seed << 13;
             seed ^= seed >> 7;
@@ -100,7 +129,9 @@ pub fn valid_session_id(id: &str) -> bool {
         && id.len() <= 128
         && id != "."
         && id != ".."
-        && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
 
 // ---- logging ---------------------------------------------------------------
@@ -116,7 +147,11 @@ pub enum Level {
 }
 
 pub fn init_logging() {
-    let level = match std::env::var("MELCHIOR_LOG").unwrap_or_default().to_ascii_lowercase().as_str() {
+    let level = match std::env::var("MELCHIOR_LOG")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "error" => Level::Error,
         "warn" => Level::Warn,
         "debug" | "trace" => Level::Debug,
@@ -156,7 +191,10 @@ mod tests {
     #[test]
     fn formats_known_dates() {
         assert_eq!(iso_from_millis(0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(iso_from_millis(1_793_000_000_123), "2026-10-26T07:33:20.123Z");
+        assert_eq!(
+            iso_from_millis(1_793_000_000_123),
+            "2026-10-26T07:33:20.123Z"
+        );
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
     }
 

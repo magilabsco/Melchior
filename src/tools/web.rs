@@ -27,27 +27,40 @@ impl Tool for WebFetch {
 
     fn call(&self, _cx: &ToolCx<'_>, args: &Json) -> ToolOutput {
         let mut url = try_out!(str_arg(args, "url")).to_string();
-        let max = opt_i64(args, "max_chars").unwrap_or(40_000).clamp(500, 200_000) as usize;
+        let max = opt_i64(args, "max_chars")
+            .unwrap_or(40_000)
+            .clamp(500, 200_000) as usize;
         for _ in 0..5 {
             let request = Request::new("GET", &url)
-                .header("Accept", "text/html,text/plain,application/json;q=0.9,*/*;q=0.5")
+                .header(
+                    "Accept",
+                    "text/html,text/plain,application/json;q=0.9,*/*;q=0.5",
+                )
                 .timeouts(Duration::from_secs(30), Duration::from_secs(60));
             let response = match http::send(&request) {
                 Ok(r) => r,
                 Err(e) => return ToolOutput::err(format!("fetch failed: {e}")),
             };
             if (300..400).contains(&response.status)
-                && let Some(location) = response.header("location") {
-                    url = absolute(&url, location);
-                    continue;
-                }
+                && let Some(location) = response.header("location")
+            {
+                url = absolute(&url, location);
+                continue;
+            }
             let status = response.status;
-            let content_type = response.header("content-type").unwrap_or("").to_ascii_lowercase();
+            let content_type = response
+                .header("content-type")
+                .unwrap_or("")
+                .to_ascii_lowercase();
             let body = match response.text(8 * 1024 * 1024) {
                 Ok(body) => body,
                 Err(e) => return ToolOutput::err(format!("fetch failed: {e}")),
             };
-            let text = if content_type.contains("html") || body.trim_start().starts_with('<') { html_to_text(&body) } else { body };
+            let text = if content_type.contains("html") || body.trim_start().starts_with('<') {
+                html_to_text(&body)
+            } else {
+                body
+            };
             let text = util::truncate(text.trim(), max, "\n…[truncated]");
             return if status >= 400 {
                 ToolOutput::err(format!("HTTP {status} from {url}\n{text}"))
@@ -64,11 +77,17 @@ fn absolute(base: &str, location: &str) -> String {
         return location.to_string();
     }
     let scheme_end = base.find("://").map(|i| i + 3).unwrap_or(0);
-    let host_end = base[scheme_end..].find('/').map(|i| i + scheme_end).unwrap_or(base.len());
+    let host_end = base[scheme_end..]
+        .find('/')
+        .map(|i| i + scheme_end)
+        .unwrap_or(base.len());
     if location.starts_with('/') {
         format!("{}{location}", &base[..host_end])
     } else {
-        let dir_end = base.rfind('/').filter(|i| *i >= host_end).unwrap_or(host_end);
+        let dir_end = base
+            .rfind('/')
+            .filter(|i| *i >= host_end)
+            .unwrap_or(host_end);
         format!("{}/{location}", &base[..dir_end])
     }
 }
@@ -98,9 +117,12 @@ pub fn html_to_text(html: &str) -> String {
             }
             let end = rest.find('>').map(|e| i + e + 1).unwrap_or(bytes.len());
             let tag = &lower[i..end];
-            if ["<br", "<p", "</p", "<div", "</div", "<li", "<tr", "<h1", "<h2", "<h3", "<h4", "</h", "<table", "</table"]
-                .iter()
-                .any(|t| tag.starts_with(t))
+            if [
+                "<br", "<p", "</p", "<div", "</div", "<li", "<tr", "<h1", "<h2", "<h3", "<h4",
+                "</h", "<table", "</table",
+            ]
+            .iter()
+            .any(|t| tag.starts_with(t))
             {
                 out.push('\n');
             } else if tag.starts_with("<td") || tag.starts_with("<th") {
@@ -146,7 +168,9 @@ mod tests {
 
     #[test]
     fn strips_html() {
-        let text = html_to_text("<html><head><title>x</title></head><body><script>bad()</script><h1>Title</h1><p>Hello &amp; welcome</p></body></html>");
+        let text = html_to_text(
+            "<html><head><title>x</title></head><body><script>bad()</script><h1>Title</h1><p>Hello &amp; welcome</p></body></html>",
+        );
         assert_eq!(text, "Title\n\nHello & welcome");
     }
 

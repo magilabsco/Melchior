@@ -34,11 +34,21 @@ pub struct Entry {
 
 impl Entry {
     pub fn new(id: &str) -> Entry {
-        Entry { id: id.into(), name: id.into(), config: Json::obj(), disabled: false }
+        Entry {
+            id: id.into(),
+            name: id.into(),
+            config: Json::obj(),
+            disabled: false,
+        }
     }
 
     pub fn named(id: &str, name: &str) -> Entry {
-        Entry { id: id.into(), name: name.into(), config: Json::obj(), disabled: false }
+        Entry {
+            id: id.into(),
+            name: name.into(),
+            config: Json::obj(),
+            disabled: false,
+        }
     }
 
     pub fn with_config(mut self, config: Json) -> Entry {
@@ -76,13 +86,18 @@ impl PluginRegistry {
         if let Some(target) = self.aliases.get(name) {
             return self.plugins.get(target).cloned();
         }
-        let short = name.strip_prefix("@deepseek-ai/dsh-").or_else(|| name.strip_prefix("@melchior/"))?;
+        let short = name
+            .strip_prefix("@deepseek-ai/dsh-")
+            .or_else(|| name.strip_prefix("@melchior/"))?;
         self.resolve(short)
     }
 }
 
 fn entry_from_json(value: &Json) -> Result<Entry, String> {
-    let id = value.get("id").as_str().ok_or("inserted entries need a string id")?;
+    let id = value
+        .get("id")
+        .as_str()
+        .ok_or("inserted entries need a string id")?;
     let name = value.get("name").as_str().unwrap_or(id);
     let config = match value.get("config") {
         Json::Null => Json::obj(),
@@ -99,7 +114,11 @@ fn entry_from_json(value: &Json) -> Result<Entry, String> {
 
 /// Apply one parsed patch file. Returns warnings for operations that named
 /// entries this harness does not have (they are skipped, not fatal).
-pub fn apply_patch(entries: &mut Vec<Entry>, patch: &Json, origin: &str) -> Result<Vec<String>, String> {
+pub fn apply_patch(
+    entries: &mut Vec<Entry>,
+    patch: &Json,
+    origin: &str,
+) -> Result<Vec<String>, String> {
     let mut warnings = Vec::new();
     let ops = match patch {
         Json::Null => return Ok(warnings),
@@ -108,7 +127,11 @@ pub fn apply_patch(entries: &mut Vec<Entry>, patch: &Json, origin: &str) -> Resu
             .iter()
             .map(|(id, config)| crate::jobj! { "id" => id.as_str(), "config" => config.clone() })
             .collect(),
-        _ => return Err(format!("{origin}: a patch must be a list of operations or a mapping")),
+        _ => {
+            return Err(format!(
+                "{origin}: a patch must be a list of operations or a mapping"
+            ));
+        }
     };
     for op in &ops {
         if !matches!(op, Json::Obj(_)) {
@@ -117,10 +140,16 @@ pub fn apply_patch(entries: &mut Vec<Entry>, patch: &Json, origin: &str) -> Resu
         if let Some(inserted) = op.get("insert").as_array() {
             let mut position = entries.len();
             if let Some(anchor) = op.get("before").as_str() {
-                position = entries.iter().position(|e| e.id == anchor).ok_or(format!("{origin}: unknown anchor {anchor:?}"))?;
+                position = entries
+                    .iter()
+                    .position(|e| e.id == anchor)
+                    .ok_or(format!("{origin}: unknown anchor {anchor:?}"))?;
             } else if let Some(anchor) = op.get("after").as_str() {
-                position =
-                    entries.iter().position(|e| e.id == anchor).ok_or(format!("{origin}: unknown anchor {anchor:?}"))? + 1;
+                position = entries
+                    .iter()
+                    .position(|e| e.id == anchor)
+                    .ok_or(format!("{origin}: unknown anchor {anchor:?}"))?
+                    + 1;
             }
             for item in inserted {
                 let entry = entry_from_json(item).map_err(|e| format!("{origin}: {e}"))?;
@@ -140,9 +169,12 @@ pub fn apply_patch(entries: &mut Vec<Entry>, patch: &Json, origin: &str) -> Resu
             return Err(format!("{origin}: operation needs id, insert, or remove"));
         };
         let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
-            let only_disables = op.get("disabled").as_bool() == Some(true) && op.get("config").is_null();
+            let only_disables =
+                op.get("disabled").as_bool() == Some(true) && op.get("config").is_null();
             if !only_disables {
-                warnings.push(format!("{origin}: no plugin entry {id:?}; operation skipped"));
+                warnings.push(format!(
+                    "{origin}: no plugin entry {id:?}; operation skipped"
+                ));
             }
             continue;
         };
@@ -167,14 +199,17 @@ pub fn apply_patch(entries: &mut Vec<Entry>, patch: &Json, origin: &str) -> Resu
 
 /// Parse a YAML patch file, evaluating `!!js` with the safe evaluator.
 pub fn read_patch_file(path: &Path) -> Result<Json, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read patch {}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read patch {}: {e}", path.display()))?;
     parse_patch_text(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 pub fn parse_patch_text(text: &str) -> Result<Json, String> {
     crate::yaml::parse(text, &mut |tag, body| match tag {
         "!!js" | "!js" => crate::jsexpr::eval_process_env(body),
-        "!env" => Ok(std::env::var(body.trim()).map(Json::Str).unwrap_or(Json::Null)),
+        "!env" => Ok(std::env::var(body.trim())
+            .map(Json::Str)
+            .unwrap_or(Json::Null)),
         other => Err(format!("unsupported YAML tag {other}")),
     })
 }
@@ -191,7 +226,12 @@ pub struct LoadReport {
 impl LoadReport {
     pub fn to_json(&self) -> Json {
         let pairs = |items: &[(String, String)], a: &str, b: &str| {
-            Json::Arr(items.iter().map(|(x, y)| crate::jobj! { a => x.as_str(), b => y.as_str() }).collect())
+            Json::Arr(
+                items
+                    .iter()
+                    .map(|(x, y)| crate::jobj! { a => x.as_str(), b => y.as_str() })
+                    .collect(),
+            )
         };
         crate::jobj! {
             "active" => pairs(&self.active, "id", "plugin"),
@@ -219,7 +259,12 @@ pub fn start(root: &Context, registry: &PluginRegistry, entries: &[Entry]) -> Lo
         match registry.resolve(&entry.name) {
             Some(plugin) => waiting.push((entry.clone(), plugin)),
             None => {
-                crate::log_warn!("loader", "entry {:?} names unknown plugin {:?}; skipped", entry.id, entry.name);
+                crate::log_warn!(
+                    "loader",
+                    "entry {:?} names unknown plugin {:?}; skipped",
+                    entry.id,
+                    entry.name
+                );
                 report.unknown.push((entry.id.clone(), entry.name.clone()));
             }
         }
@@ -228,7 +273,10 @@ pub fn start(root: &Context, registry: &PluginRegistry, entries: &[Entry]) -> Lo
         let mut progressed = false;
         let mut still = Vec::new();
         for (entry, plugin) in waiting {
-            let ready = plugin.inject().iter().all(|name| root.app().has_service(name));
+            let ready = plugin
+                .inject()
+                .iter()
+                .all(|name| root.app().has_service(name));
             if !ready {
                 still.push((entry, plugin));
                 continue;
@@ -237,7 +285,9 @@ pub fn start(root: &Context, registry: &PluginRegistry, entries: &[Entry]) -> Lo
             match root.plugin(plugin.as_ref(), &entry.id, entry.config.clone()) {
                 Ok(_) => {
                     crate::log_debug!("loader", "activated {} ({})", entry.id, plugin.name());
-                    report.active.push((entry.id.clone(), plugin.name().to_string()));
+                    report
+                        .active
+                        .push((entry.id.clone(), plugin.name().to_string()));
                 }
                 Err(error) => {
                     crate::log_error!("loader", "plugin {} failed to start: {error}", entry.id);
@@ -251,9 +301,18 @@ pub fn start(root: &Context, registry: &PluginRegistry, entries: &[Entry]) -> Lo
         }
     }
     for (entry, plugin) in waiting {
-        let missing: Vec<String> =
-            plugin.inject().iter().filter(|n| !root.app().has_service(n)).map(|n| n.to_string()).collect();
-        crate::log_warn!("loader", "plugin {} is waiting for {}", entry.id, missing.join(", "));
+        let missing: Vec<String> = plugin
+            .inject()
+            .iter()
+            .filter(|n| !root.app().has_service(n))
+            .map(|n| n.to_string())
+            .collect();
+        crate::log_warn!(
+            "loader",
+            "plugin {} is waiting for {}",
+            entry.id,
+            missing.join(", ")
+        );
         report.pending.push((entry.id, missing));
     }
     report
@@ -265,7 +324,11 @@ mod tests {
 
     #[test]
     fn applies_deepseek_harness_style_patches() {
-        let mut entries = vec![Entry::new("system-prompt"), Entry::new("tool-bash"), Entry::new("llm-pi-ai")];
+        let mut entries = vec![
+            Entry::new("system-prompt"),
+            Entry::new("tool-bash"),
+            Entry::new("llm-pi-ai"),
+        ];
         let patch = parse_patch_text(
             "- id: system-prompt\n  config:\n    personaPrefix: hi\n- id: tool-bash\n  disabled: true\n- id: tool-ralph\n  disabled: true\n- id: nope\n  config: {a: 1}\n- insert:\n    - id: mcp-tools\n      name: '@deepseek-ai/dsh-mcp-client'\n      config: {serverName: tools}\n",
         )
@@ -280,9 +343,20 @@ mod tests {
     #[test]
     fn settings_mapping_merges_configs() {
         let mut entries = vec![Entry::new("llm-pi-ai").with_config(crate::jobj! { "keep" => 1 })];
-        let patch = parse_patch_text("llm-pi-ai:\n  providers:\n    openrouter:\n      baseURL: http://x\n").unwrap();
+        let patch = parse_patch_text(
+            "llm-pi-ai:\n  providers:\n    openrouter:\n      baseURL: http://x\n",
+        )
+        .unwrap();
         apply_patch(&mut entries, &patch, "settings").unwrap();
         assert_eq!(entries[0].config.get("keep").as_i64(), Some(1));
-        assert_eq!(entries[0].config.get("providers").get("openrouter").get("baseURL").as_str(), Some("http://x"));
+        assert_eq!(
+            entries[0]
+                .config
+                .get("providers")
+                .get("openrouter")
+                .get("baseURL")
+                .as_str(),
+            Some("http://x")
+        );
     }
 }

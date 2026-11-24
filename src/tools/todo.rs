@@ -23,7 +23,10 @@ pub fn render(todos: &Json) -> String {
 }
 
 pub fn prompt_section(todos: &Json) -> Option<String> {
-    let open = todos.items().iter().any(|t| t.get("status").as_str() != Some("completed"));
+    let open = todos
+        .items()
+        .iter()
+        .any(|t| t.get("status").as_str() != Some("completed"));
     open.then(|| format!("# Task list\n{}", render(todos)))
 }
 
@@ -58,7 +61,11 @@ impl Tool for TodoWrite {
         };
         let mut todos = Vec::new();
         for item in items {
-            let Some(content) = item.get("content").as_str().filter(|c| !c.trim().is_empty()) else {
+            let Some(content) = item
+                .get("content")
+                .as_str()
+                .filter(|c| !c.trim().is_empty())
+            else {
                 return ToolOutput::err("every todo needs non-empty content");
             };
             let status = item.get("status").str_or("pending");
@@ -71,6 +78,10 @@ impl Tool for TodoWrite {
         if let Err(e) = cx.session.set_state(STATE_KEY, todos.clone()) {
             return ToolOutput::err(e);
         }
-        ToolOutput::ok(if todos.items().is_empty() { "Task list cleared.".into() } else { render(&todos) })
+        ToolOutput::ok(if todos.items().is_empty() {
+            "Task list cleared.".into()
+        } else {
+            render(&todos)
+        })
     }
 }

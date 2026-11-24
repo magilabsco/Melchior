@@ -86,15 +86,27 @@ pub struct McpServer {
 }
 
 fn valid_server_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 32 && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    !name.is_empty()
+        && name.len() <= 32
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
 fn string_pairs(value: &Json) -> Vec<(String, String)> {
-    value.entries().iter().filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string()))).collect()
+    value
+        .entries()
+        .iter()
+        .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+        .collect()
 }
 
 impl McpServer {
-    fn with_transport(name: &str, transport: Transport, call_timeout: Duration) -> Result<McpServer, String> {
+    fn with_transport(
+        name: &str,
+        transport: Transport,
+        call_timeout: Duration,
+    ) -> Result<McpServer, String> {
         if !valid_server_name(name) {
             return Err(format!("mcp-client: invalid serverName {name:?}"));
         }
@@ -109,7 +121,12 @@ impl McpServer {
     }
 
     /// A streamable-HTTP server.
-    pub fn http(name: &str, url: &str, headers: Vec<(String, String)>, call_timeout: Duration) -> Result<McpServer, String> {
+    pub fn http(
+        name: &str,
+        url: &str,
+        headers: Vec<(String, String)>,
+        call_timeout: Duration,
+    ) -> Result<McpServer, String> {
         let transport = HttpTransport {
             url: url.to_string(),
             headers,
@@ -120,35 +137,76 @@ impl McpServer {
     }
 
     /// A stdio server, started by the first `connect`.
-    pub fn stdio(name: &str, command: StdioCommand, call_timeout: Duration) -> Result<McpServer, String> {
-        McpServer::with_transport(name, Transport::Stdio(StdioTransport { command, process: Mutex::new(None) }), call_timeout)
+    pub fn stdio(
+        name: &str,
+        command: StdioCommand,
+        call_timeout: Duration,
+    ) -> Result<McpServer, String> {
+        McpServer::with_transport(
+            name,
+            Transport::Stdio(StdioTransport {
+                command,
+                process: Mutex::new(None),
+            }),
+            call_timeout,
+        )
     }
 
     /// From an `mcp-client` entry's config. A stdio server's environment is
     /// the harness environment without its credentials, plus `env`.
     pub fn from_config(config: &Json, runtime: &Runtime) -> Result<McpServer, String> {
-        let name = config.get("serverName").as_str().ok_or("mcp-client: serverName is required")?;
-        let timeout_ms = config.get("toolCallTimeoutMs").as_i64().unwrap_or(180_000).clamp(1_000, 900_000);
+        let name = config
+            .get("serverName")
+            .as_str()
+            .ok_or("mcp-client: serverName is required")?;
+        let timeout_ms = config
+            .get("toolCallTimeoutMs")
+            .as_i64()
+            .unwrap_or(180_000)
+            .clamp(1_000, 900_000);
         let call_timeout = Duration::from_millis(timeout_ms as u64);
-        let default_transport = if config.get("command").is_null() { "streamable-http" } else { "stdio" };
+        let default_transport = if config.get("command").is_null() {
+            "streamable-http"
+        } else {
+            "stdio"
+        };
         match config.get("transport").str_or(default_transport) {
             "streamable-http" | "http" => {
-                let url = config.get("url").as_str().ok_or(format!("mcp-client({name}): url is required"))?;
+                let url = config
+                    .get("url")
+                    .as_str()
+                    .ok_or(format!("mcp-client({name}): url is required"))?;
                 McpServer::http(name, url, string_pairs(config.get("headers")), call_timeout)
             }
             "stdio" => {
-                let command = config.get("command").as_str().ok_or(format!("mcp-client({name}): command is required for stdio"))?;
+                let command = config
+                    .get("command")
+                    .as_str()
+                    .ok_or(format!("mcp-client({name}): command is required for stdio"))?;
                 let mut env = runtime.child_env();
                 env.extend(string_pairs(config.get("env")));
                 let command = StdioCommand {
                     command: command.to_string(),
-                    args: config.get("args").items().iter().filter_map(|a| a.as_str().map(str::to_string)).collect(),
+                    args: config
+                        .get("args")
+                        .items()
+                        .iter()
+                        .filter_map(|a| a.as_str().map(str::to_string))
+                        .collect(),
                     env,
-                    cwd: Some(config.get("cwd").as_str().map(|c| runtime.resolve_path(c)).unwrap_or_else(|| runtime.cwd.clone())),
+                    cwd: Some(
+                        config
+                            .get("cwd")
+                            .as_str()
+                            .map(|c| runtime.resolve_path(c))
+                            .unwrap_or_else(|| runtime.cwd.clone()),
+                    ),
                 };
                 McpServer::stdio(name, command, call_timeout)
             }
-            other => Err(format!("mcp-client({name}): transport {other:?} is not supported (use streamable-http or stdio)")),
+            other => Err(format!(
+                "mcp-client({name}): transport {other:?} is not supported (use streamable-http or stdio)"
+            )),
         }
     }
 
@@ -158,7 +216,12 @@ impl McpServer {
 
     // ---- streamable HTTP ---------------------------------------------------
 
-    fn post(&self, http: &HttpTransport, body: &Json, timeout: Duration) -> Result<Option<Json>, String> {
+    fn post(
+        &self,
+        http: &HttpTransport,
+        body: &Json,
+        timeout: Duration,
+    ) -> Result<Option<Json>, String> {
         let mut request = Request::new("POST", &http.url)
             .json(body)
             .header("Accept", "application/json, text/event-stream")
@@ -180,10 +243,17 @@ impl McpServer {
         if status == 202 || status == 204 {
             return Ok(None);
         }
-        let event_stream = response.header("content-type").map(|v| v.contains("event-stream")).unwrap_or(false);
+        let event_stream = response
+            .header("content-type")
+            .map(|v| v.contains("event-stream"))
+            .unwrap_or(false);
         if status >= 400 {
             let text = response.text(16 * 1024).unwrap_or_default();
-            return Err(format!("{}: MCP server returned HTTP {status}: {}", self.name, util::truncate(text.trim(), 400, "…")));
+            return Err(format!(
+                "{}: MCP server returned HTTP {status}: {}",
+                self.name,
+                util::truncate(text.trim(), 400, "…")
+            ));
         }
         let wanted = body.get("id").clone();
         if !event_stream {
@@ -191,15 +261,24 @@ impl McpServer {
             if text.trim().is_empty() {
                 return Ok(None);
             }
-            return json::parse(&text).map(Some).map_err(|e| format!("{}: invalid MCP response: {e}", self.name));
+            return json::parse(&text)
+                .map(Some)
+                .map_err(|e| format!("{}: invalid MCP response: {e}", self.name));
         }
         let mut reader = response.body;
         let mut data = String::new();
         let mut line = String::new();
         loop {
             line.clear();
-            if reader.read_line(&mut line).map_err(|e| format!("{}: MCP stream failed: {e}", self.name))? == 0 {
-                return Err(format!("{}: MCP stream ended without a response", self.name));
+            if reader
+                .read_line(&mut line)
+                .map_err(|e| format!("{}: MCP stream failed: {e}", self.name))?
+                == 0
+            {
+                return Err(format!(
+                    "{}: MCP stream ended without a response",
+                    self.name
+                ));
             }
             let trimmed = line.trim_end_matches(['\r', '\n']);
             if let Some(payload) = trimmed.strip_prefix("data:") {
@@ -207,9 +286,12 @@ impl McpServer {
                 continue;
             }
             if trimmed.is_empty() && !data.is_empty() {
-                let message = json::parse(&data).map_err(|e| format!("{}: invalid MCP event: {e}", self.name))?;
+                let message = json::parse(&data)
+                    .map_err(|e| format!("{}: invalid MCP event: {e}", self.name))?;
                 data.clear();
-                if message.get("id") == &wanted && (!message.get("result").is_null() || !message.get("error").is_null()) {
+                if message.get("id") == &wanted
+                    && (!message.get("result").is_null() || !message.get("error").is_null())
+                {
                     return Ok(Some(message));
                 }
             }
@@ -221,13 +303,27 @@ impl McpServer {
     fn spawn(&self, stdio: &StdioTransport) -> Result<StdioProcess, String> {
         let spec = &stdio.command;
         let mut command = Command::new(&spec.command);
-        command.args(&spec.args).env_clear().envs(spec.env.iter().cloned()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        command
+            .args(&spec.args)
+            .env_clear()
+            .envs(spec.env.iter().cloned())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         if let Some(cwd) = &spec.cwd {
             command.current_dir(cwd);
         }
-        let mut child = command.spawn().map_err(|e| format!("{}: cannot start {}: {e}", self.name, spec.command))?;
-        let stdin = child.stdin.take().ok_or(format!("{}: no stdin", self.name))?;
-        let stdout = child.stdout.take().ok_or(format!("{}: no stdout", self.name))?;
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("{}: cannot start {}: {e}", self.name, spec.command))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or(format!("{}: no stdin", self.name))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or(format!("{}: no stdout", self.name))?;
         let stderr = child.stderr.take();
         let (sender, lines) = mpsc::channel();
         let reader_name = format!("mcp-{}", self.name);
@@ -244,24 +340,39 @@ impl McpServer {
             .map_err(|e| format!("{}: {e}", self.name))?;
         if let Some(stderr) = stderr {
             let server = self.name.clone();
-            let _ = std::thread::Builder::new().name(format!("{reader_name}-stderr")).spawn(move || {
-                for line in BufReader::new(stderr).lines() {
-                    let Ok(line) = line else { break };
-                    log_debug!("mcp", "{server}: {line}");
-                }
-            });
+            let _ = std::thread::Builder::new()
+                .name(format!("{reader_name}-stderr"))
+                .spawn(move || {
+                    for line in BufReader::new(stderr).lines() {
+                        let Ok(line) = line else { break };
+                        log_debug!("mcp", "{server}: {line}");
+                    }
+                });
         }
-        Ok(StdioProcess { child: crate::proc::track(child), stdin, lines })
+        Ok(StdioProcess {
+            child: crate::proc::track(child),
+            stdin,
+            lines,
+        })
     }
 
-    fn stdio_exchange(&self, stdio: &StdioTransport, body: &Json, timeout: Duration) -> Result<Option<Json>, String> {
+    fn stdio_exchange(
+        &self,
+        stdio: &StdioTransport,
+        body: &Json,
+        timeout: Duration,
+    ) -> Result<Option<Json>, String> {
         let mut slot = stdio.process.lock().unwrap();
         let Some(process) = slot.as_mut() else {
             self.connected.store(false, Ordering::SeqCst);
             return Err(format!("{}: the server is not running", self.name));
         };
         let line = format!("{body}\n");
-        if let Err(e) = process.stdin.write_all(line.as_bytes()).and_then(|_| process.stdin.flush()) {
+        if let Err(e) = process
+            .stdin
+            .write_all(line.as_bytes())
+            .and_then(|_| process.stdin.flush())
+        {
             process.kill();
             *slot = None;
             self.connected.store(false, Ordering::SeqCst);
@@ -277,7 +388,12 @@ impl McpServer {
             match process.lines.recv_timeout(left) {
                 Ok(line) => {
                     let Ok(message) = json::parse(&line) else {
-                        log_debug!("mcp", "{}: ignoring non-JSON output: {}", self.name, util::truncate(&line, 200, "…"));
+                        log_debug!(
+                            "mcp",
+                            "{}: ignoring non-JSON output: {}",
+                            self.name,
+                            util::truncate(&line, 200, "…")
+                        );
                         continue;
                     };
                     if message.get("id") == &wanted && message.get("method").is_null() {
@@ -291,7 +407,7 @@ impl McpServer {
                             jobj! { "jsonrpc" => "2.0", "id" => message.get("id").clone(), "result" => jobj! {} }
                         } else {
                             jobj! { "jsonrpc" => "2.0", "id" => message.get("id").clone(),
-                                "error" => jobj! { "code" => -32601, "message" => format!("{method} is not supported") } }
+                            "error" => jobj! { "code" => -32601, "message" => format!("{method} is not supported") } }
                         };
                         let _ = process.stdin.write_all(format!("{reply}\n").as_bytes());
                     }
@@ -300,7 +416,11 @@ impl McpServer {
                     process.kill();
                     *slot = None;
                     self.connected.store(false, Ordering::SeqCst);
-                    return Err(format!("{}: no response within {}s; the server was stopped", self.name, timeout.as_secs()));
+                    return Err(format!(
+                        "{}: no response within {}s; the server was stopped",
+                        self.name,
+                        timeout.as_secs()
+                    ));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     process.kill();
@@ -324,9 +444,15 @@ impl McpServer {
     fn request(&self, method: &str, params: Json, timeout: Duration) -> Result<Json, String> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst) as i64;
         let body = jobj! { "jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params };
-        let response = self.send(&body, timeout)?.ok_or(format!("{}: empty response to {method}", self.name))?;
+        let response = self
+            .send(&body, timeout)?
+            .ok_or(format!("{}: empty response to {method}", self.name))?;
         if !response.get("error").is_null() {
-            return Err(format!("{}: {method} failed: {}", self.name, response.get("error").get("message").str_or("unknown error")));
+            return Err(format!(
+                "{}: {method} failed: {}",
+                self.name,
+                response.get("error").get("message").str_or("unknown error")
+            ));
         }
         Ok(response.get("result").clone())
     }
@@ -359,9 +485,17 @@ impl McpServer {
             timeout,
         )?;
         if let Transport::Http(http) = &self.transport {
-            *http.protocol.lock().unwrap() = Some(result.get("protocolVersion").str_or(PROTOCOL_VERSION).to_string());
+            *http.protocol.lock().unwrap() = Some(
+                result
+                    .get("protocolVersion")
+                    .str_or(PROTOCOL_VERSION)
+                    .to_string(),
+            );
         }
-        let _ = self.send(&jobj! { "jsonrpc" => "2.0", "method" => "notifications/initialized" }, timeout);
+        let _ = self.send(
+            &jobj! { "jsonrpc" => "2.0", "method" => "notifications/initialized" },
+            timeout,
+        );
         let mut raw = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..50 {
@@ -378,9 +512,14 @@ impl McpServer {
         }
         let mut tools: Vec<RawTool> = Vec::new();
         for tool in &raw {
-            let Some(name) = tool.get("name").as_str() else { continue };
+            let Some(name) = tool.get("name").as_str() else {
+                continue;
+            };
             if tools.iter().any(|t| t.name == name) {
-                return Err(format!("{}: server listed tool {name:?} more than once", self.name));
+                return Err(format!(
+                    "{}: server listed tool {name:?} more than once",
+                    self.name
+                ));
             }
             let schema = match tool.get("inputSchema") {
                 s @ Json::Obj(_) => s.clone(),
@@ -416,7 +555,8 @@ impl McpServer {
             Err(error) => {
                 // A gateway restart invalidates the HTTP session, and a stdio
                 // server may have exited; reconnect once.
-                let retry = error.contains("HTTP 404") || (self.is_stdio() && !self.connected.load(Ordering::SeqCst));
+                let retry = error.contains("HTTP 404")
+                    || (self.is_stdio() && !self.connected.load(Ordering::SeqCst));
                 if retry && self.connect().is_ok() {
                     match self.request("tools/call", params, self.call_timeout) {
                         Ok(result) => result,
@@ -431,20 +571,41 @@ impl McpServer {
         for block in result.get("content").items() {
             match block.get("type").as_str() {
                 Some("text") => parts.push(block.get("text").str_or("").to_string()),
-                Some("image") => parts.push("[image returned by the tool; not shown to the model]".into()),
-                Some("resource") => parts.push(block.get("resource").get("text").str_or("[resource]").to_string()),
+                Some("image") => {
+                    parts.push("[image returned by the tool; not shown to the model]".into())
+                }
+                Some("resource") => parts.push(
+                    block
+                        .get("resource")
+                        .get("text")
+                        .str_or("[resource]")
+                        .to_string(),
+                ),
                 _ => {}
             }
         }
         if parts.is_empty() && !result.get("structuredContent").is_null() {
             parts.push(result.get("structuredContent").to_string());
         }
-        let text = if parts.is_empty() { format!("({raw_name} returned no model-visible content)") } else { parts.join("\n") };
-        if result.get("isError").as_bool() == Some(true) { ToolOutput::err(text) } else { ToolOutput::ok(text) }
+        let text = if parts.is_empty() {
+            format!("({raw_name} returned no model-visible content)")
+        } else {
+            parts.join("\n")
+        };
+        if result.get("isError").as_bool() == Some(true) {
+            ToolOutput::err(text)
+        } else {
+            ToolOutput::ok(text)
+        }
     }
 
     pub fn find(&self, raw_name: &str) -> Option<RawTool> {
-        self.tools.lock().unwrap().iter().find(|t| t.name == raw_name).cloned()
+        self.tools
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|t| t.name == raw_name)
+            .cloned()
     }
 }
 
@@ -455,18 +616,35 @@ impl Drop for McpServer {
 }
 
 fn sanitize(name: &str) -> String {
-    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 pub fn assign_public_names(server: &str, tools: &mut [RawTool]) {
-    let base: Vec<String> = tools.iter().map(|t| sanitize(&format!("mcp__{server}__{}", t.name))).collect();
+    let base: Vec<String> = tools
+        .iter()
+        .map(|t| sanitize(&format!("mcp__{server}__{}", t.name)))
+        .collect();
     for (index, tool) in tools.iter_mut().enumerate() {
         let candidate = &base[index];
-        let collides = base.iter().enumerate().any(|(j, other)| j != index && other == candidate);
+        let collides = base
+            .iter()
+            .enumerate()
+            .any(|(j, other)| j != index && other == candidate);
         tool.public_name = if candidate.len() <= 64 && !collides {
             candidate.clone()
         } else {
-            let hash = format!("{:012x}", util::fnv1a(format!("{server}\0{}", tool.name).as_bytes()) & 0xffff_ffff_ffff);
+            let hash = format!(
+                "{:012x}",
+                util::fnv1a(format!("{server}\0{}", tool.name).as_bytes()) & 0xffff_ffff_ffff
+            );
             let keep = candidate.len().min(64 - 13);
             format!("{}_{hash}", &candidate[..keep])
         };
@@ -481,11 +659,18 @@ pub struct McpTool {
 impl Tool for McpTool {
     fn spec(&self) -> ToolSpec {
         let description = if self.raw.description.is_empty() {
-            format!("[{}] tool from the {} server.", self.raw.name, self.server.name)
+            format!(
+                "[{}] tool from the {} server.",
+                self.raw.name, self.server.name
+            )
         } else {
             format!("[{}] {}", self.raw.name, self.raw.description)
         };
-        ToolSpec { name: self.raw.public_name.clone(), description, parameters: self.raw.input_schema.clone() }
+        ToolSpec {
+            name: self.raw.public_name.clone(),
+            description,
+            parameters: self.raw.input_schema.clone(),
+        }
     }
 
     fn call(&self, _cx: &ToolCx<'_>, args: &Json) -> ToolOutput {
@@ -503,7 +688,10 @@ impl McpHub {
     pub fn add(&self, server: Arc<McpServer>) -> Result<(), String> {
         let mut servers = self.servers.lock().unwrap();
         if servers.iter().any(|s| s.name == server.name) {
-            return Err(format!("mcp-client: serverName {:?} is already in use", server.name));
+            return Err(format!(
+                "mcp-client: serverName {:?} is already in use",
+                server.name
+            ));
         }
         servers.push(server);
         Ok(())
@@ -531,12 +719,22 @@ mod tests {
     use super::*;
 
     fn raw(name: &str) -> RawTool {
-        RawTool { name: name.into(), public_name: String::new(), description: String::new(), input_schema: Json::Null }
+        RawTool {
+            name: name.into(),
+            public_name: String::new(),
+            description: String::new(),
+            input_schema: Json::Null,
+        }
     }
 
     #[test]
     fn public_names_are_clean_unless_they_collide() {
-        let mut tools = vec![raw("files.list"), raw("leviathan.search"), raw("a.b"), raw("a_b")];
+        let mut tools = vec![
+            raw("files.list"),
+            raw("leviathan.search"),
+            raw("a.b"),
+            raw("a_b"),
+        ];
         assign_public_names("tools", &mut tools);
         assert_eq!(tools[0].public_name, "mcp__tools__files_list");
         assert_eq!(tools[1].public_name, "mcp__tools__leviathan_search");

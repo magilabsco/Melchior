@@ -58,7 +58,9 @@ pub fn checked_path(cx: &ToolCx<'_>, raw: &str) -> Result<PathBuf, ToolOutput> {
     if resolved.starts_with(&root) {
         Ok(resolved)
     } else {
-        Err(ToolOutput::err(format!("sandbox: file access denied: {raw} is outside the workspace")))
+        Err(ToolOutput::err(format!(
+            "sandbox: file access denied: {raw} is outside the workspace"
+        )))
     }
 }
 
@@ -90,14 +92,20 @@ impl Tool for Read {
             return ToolOutput::err(format!("{raw} is a directory; use glob to list files"));
         }
         if meta.len() > MAX_READ_BYTES {
-            return ToolOutput::err(format!("{raw} is {} bytes; too large to read whole (limit {MAX_READ_BYTES})", meta.len()));
+            return ToolOutput::err(format!(
+                "{raw} is {} bytes; too large to read whole (limit {MAX_READ_BYTES})",
+                meta.len()
+            ));
         }
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) => return ToolOutput::err(format!("cannot read {raw}: {e}")),
         };
         if bytes.iter().take(8192).any(|b| *b == 0) {
-            return ToolOutput::ok(format!("{raw} is a binary file ({} bytes); it cannot be shown as text.", bytes.len()));
+            return ToolOutput::ok(format!(
+                "{raw} is a binary file ({} bytes); it cannot be shown as text.",
+                bytes.len()
+            ));
         }
         let text = String::from_utf8_lossy(&bytes);
         let offset = opt_i64(args, "offset").unwrap_or(1).max(1) as usize;
@@ -108,11 +116,19 @@ impl Tool for Read {
         }
         let mut out = String::new();
         for (index, line) in lines.iter().enumerate().skip(offset - 1).take(limit) {
-            out.push_str(&format!("{:>6}\t{}\n", index + 1, util::truncate(line, 2000, "…")));
+            out.push_str(&format!(
+                "{:>6}\t{}\n",
+                index + 1,
+                util::truncate(line, 2000, "…")
+            ));
         }
         let shown_end = (offset - 1 + limit).min(lines.len());
         if shown_end < lines.len() {
-            out.push_str(&format!("… {} more lines (use offset={} to continue)\n", lines.len() - shown_end, shown_end + 1));
+            out.push_str(&format!(
+                "… {} more lines (use offset={} to continue)\n",
+                lines.len() - shown_end,
+                shown_end + 1
+            ));
         }
         ToolOutput::ok(out)
     }
@@ -139,9 +155,10 @@ impl Tool for Write {
         let content = try_out!(str_arg(args, "content"));
         let path = try_out!(checked_path(cx, raw));
         if let Some(parent) = path.parent()
-            && let Err(e) = fs::create_dir_all(parent) {
-                return ToolOutput::err(format!("cannot create {}: {e}", parent.display()));
-            }
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            return ToolOutput::err(format!("cannot create {}: {e}", parent.display()));
+        }
         match fs::write(&path, content) {
             Ok(()) => ToolOutput::ok(format!("Wrote {} bytes to {raw}.", content.len())),
             Err(e) => ToolOutput::err(format!("cannot write {raw}: {e}")),
@@ -185,11 +202,20 @@ impl Tool for Edit {
             return ToolOutput::err(format!("old_string was not found in {raw}"));
         }
         if count > 1 && !all {
-            return ToolOutput::err(format!("old_string occurs {count} times in {raw}; add context or set replace_all"));
+            return ToolOutput::err(format!(
+                "old_string occurs {count} times in {raw}; add context or set replace_all"
+            ));
         }
-        let updated = if all { text.replace(old, new) } else { text.replacen(old, new, 1) };
+        let updated = if all {
+            text.replace(old, new)
+        } else {
+            text.replacen(old, new, 1)
+        };
         match fs::write(&path, updated) {
-            Ok(()) => ToolOutput::ok(format!("Replaced {} occurrence(s) in {raw}.", if all { count } else { 1 })),
+            Ok(()) => ToolOutput::ok(format!(
+                "Replaced {} occurrence(s) in {raw}.",
+                if all { count } else { 1 }
+            )),
             Err(e) => ToolOutput::err(format!("cannot write {raw}: {e}")),
         }
     }
@@ -201,12 +227,16 @@ impl Tool for Edit {
 /// `[...]`, and `{a,b}`.
 pub fn glob_match(pattern: &str, path: &str) -> bool {
     if let Some(start) = pattern.find('{')
-        && let Some(len) = pattern[start..].find('}') {
-            let end = start + len;
-            return pattern[start + 1..end]
-                .split(',')
-                .any(|alt| glob_match(&format!("{}{alt}{}", &pattern[..start], &pattern[end + 1..]), path));
-        }
+        && let Some(len) = pattern[start..].find('}')
+    {
+        let end = start + len;
+        return pattern[start + 1..end].split(',').any(|alt| {
+            glob_match(
+                &format!("{}{alt}{}", &pattern[..start], &pattern[end + 1..]),
+                path,
+            )
+        });
+    }
     let pattern: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
     let path: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     match_segments(&pattern, &path)
@@ -216,7 +246,11 @@ fn match_segments(pattern: &[&str], path: &[&str]) -> bool {
     match pattern.first() {
         None => path.is_empty(),
         Some(&"**") => (0..=path.len()).any(|skip| match_segments(&pattern[1..], &path[skip..])),
-        Some(segment) => !path.is_empty() && match_segment(segment.as_bytes(), path[0].as_bytes()) && match_segments(&pattern[1..], &path[1..]),
+        Some(segment) => {
+            !path.is_empty()
+                && match_segment(segment.as_bytes(), path[0].as_bytes())
+                && match_segments(&pattern[1..], &path[1..])
+        }
     }
 }
 
@@ -227,7 +261,9 @@ fn match_segment(pattern: &[u8], name: &[u8]) -> bool {
         Some(b'?') => !name.is_empty() && match_segment(&pattern[1..], &name[1..]),
         Some(b'[') => {
             let Some(close) = pattern.iter().position(|b| *b == b']') else {
-                return !name.is_empty() && name[0] == b'[' && match_segment(&pattern[1..], &name[1..]);
+                return !name.is_empty()
+                    && name[0] == b'['
+                    && match_segment(&pattern[1..], &name[1..]);
             };
             if name.is_empty() {
                 return false;
@@ -257,7 +293,9 @@ fn match_segment(pattern: &[u8], name: &[u8]) -> bool {
 const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".venv", "__pycache__"];
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<String>, limit: usize, visited: &mut usize) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
@@ -267,7 +305,9 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<String>, limit: usize, visited: &
         }
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
-        let Ok(kind) = entry.file_type() else { continue };
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
         if kind.is_dir() {
             if !SKIP_DIRS.contains(&name.as_str()) {
                 walk(root, &path, out, limit, visited);
@@ -303,9 +343,16 @@ impl Tool for Glob {
         let mut files = Vec::new();
         let mut visited = 0;
         walk(&base, &base, &mut files, 100_000, &mut visited);
-        let matches: Vec<String> = files.into_iter().filter(|f| glob_match(pattern, f)).take(500).collect();
+        let matches: Vec<String> = files
+            .into_iter()
+            .filter(|f| glob_match(pattern, f))
+            .take(500)
+            .collect();
         if matches.is_empty() {
-            ToolOutput::ok(format!("No files match {pattern:?} under {}.", base.display()))
+            ToolOutput::ok(format!(
+                "No files match {pattern:?} under {}.",
+                base.display()
+            ))
         } else {
             ToolOutput::ok(matches.join("\n"))
         }
@@ -334,11 +381,22 @@ impl Tool for Grep {
         let pattern = try_out!(str_arg(args, "pattern"));
         let target = try_out!(checked_path(cx, opt_str(args, "path").unwrap_or(".")));
         let insensitive = args.get("case_insensitive").as_bool().unwrap_or(false);
-        let rg = ["/usr/bin/rg", "/usr/local/bin/rg"].into_iter().find(|p| Path::new(p).exists());
+        let rg = ["/usr/bin/rg", "/usr/local/bin/rg"]
+            .into_iter()
+            .find(|p| Path::new(p).exists());
         let mut command = match rg {
             Some(rg) => {
                 let mut c = Command::new(rg);
-                c.args(["--no-heading", "--line-number", "--color", "never", "--max-columns", "400", "--max-count", "50"]);
+                c.args([
+                    "--no-heading",
+                    "--line-number",
+                    "--color",
+                    "never",
+                    "--max-columns",
+                    "400",
+                    "--max-count",
+                    "50",
+                ]);
                 if insensitive {
                     c.arg("-i");
                 }
@@ -361,14 +419,24 @@ impl Tool for Grep {
                 c
             }
         };
-        command.env_clear().envs(cx.runtime.child_env()).stdin(Stdio::null());
+        command
+            .env_clear()
+            .envs(cx.runtime.child_env())
+            .stdin(Stdio::null());
         match command.output() {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 match output.status.code() {
-                    Some(0) => ToolOutput::ok(util::truncate(&stdout, 30_000, "\n…[more matches truncated]")),
+                    Some(0) => ToolOutput::ok(util::truncate(
+                        &stdout,
+                        30_000,
+                        "\n…[more matches truncated]",
+                    )),
                     Some(1) => ToolOutput::ok(format!("No matches for {pattern:?}.")),
-                    _ => ToolOutput::err(format!("grep failed: {}", String::from_utf8_lossy(&output.stderr).trim())),
+                    _ => ToolOutput::err(format!(
+                        "grep failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )),
                 }
             }
             Err(e) => ToolOutput::err(format!("cannot run search: {e}")),
@@ -392,7 +460,10 @@ mod tests {
 
     #[test]
     fn normalizes_parent_components() {
-        assert_eq!(normalize(Path::new("/w/a/../b/./c")), PathBuf::from("/w/b/c"));
+        assert_eq!(
+            normalize(Path::new("/w/a/../b/./c")),
+            PathBuf::from("/w/b/c")
+        );
         assert_eq!(normalize(Path::new("/w/../../etc")), PathBuf::from("/etc"));
     }
 }

@@ -37,7 +37,11 @@ fn read_request(stream: &mut TcpStream) -> Option<Request> {
         let (name, value) = header.split_once(':')?;
         headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
     }
-    let length: usize = headers.iter().find(|(n, _)| n == "content-length").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
+    let length: usize = headers
+        .iter()
+        .find(|(n, _)| n == "content-length")
+        .and_then(|(_, v)| v.parse().ok())
+        .unwrap_or(0);
     let mut body = vec![0; length];
     reader.read_exact(&mut body).ok()?;
     Some((path, headers, String::from_utf8(body).ok()?))
@@ -51,7 +55,9 @@ fn serve(handler: Handler) -> u16 {
         for mut stream in listener.incoming().flatten() {
             let handler = handler.clone();
             std::thread::spawn(move || {
-                let Some((path, headers, body)) = read_request(&mut stream) else { return };
+                let Some((path, headers, body)) = read_request(&mut stream) else {
+                    return;
+                };
                 let request = json::parse(&body).unwrap_or(Json::Null);
                 let (status, content_type, body) = handler(&path, &headers, &request);
                 let _ = write!(
@@ -78,18 +84,34 @@ fn model_reply(tool: Option<(&str, &str)>, answer: &str) -> Reply {
             r#"{{"choices":[{{"index":0,"delta":{{"role":"assistant","tool_calls":[{{"index":0,"id":"call-{name}","type":"function","function":{{"name":"{name}","arguments":{}}}}}]}},"finish_reason":"tool_calls"}}]}}"#,
             Json::from(arguments)
         ),
-        None => format!(r#"{{"choices":[{{"index":0,"delta":{{"role":"assistant","content":{}}},"finish_reason":"stop"}}]}}"#, Json::from(answer)),
+        None => format!(
+            r#"{{"choices":[{{"index":0,"delta":{{"role":"assistant","content":{}}},"finish_reason":"stop"}}]}}"#,
+            Json::from(answer)
+        ),
     };
-    let usage = r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#.to_string();
+    let usage =
+        r#"{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#
+            .to_string();
     ("200 OK", "text/event-stream", sse(&[delta, usage]))
 }
 
 fn tool_names(request: &Json) -> Vec<String> {
-    request.get("tools").items().iter().filter_map(|t| t.get("function").get("name").as_str().map(str::to_string)).collect()
+    request
+        .get("tools")
+        .items()
+        .iter()
+        .filter_map(|t| t.get("function").get("name").as_str().map(str::to_string))
+        .collect()
 }
 
 fn tool_messages(request: &Json) -> Vec<String> {
-    request.get("messages").items().iter().filter(|m| m.get("role").as_str() == Some("tool")).map(|m| m.get("content").to_string()).collect()
+    request
+        .get("messages")
+        .items()
+        .iter()
+        .filter(|m| m.get("role").as_str() == Some("tool"))
+        .map(|m| m.get("content").to_string())
+        .collect()
 }
 
 // ---- the harness process ---------------------------------------------------
@@ -104,15 +126,28 @@ struct Harness {
 impl Harness {
     fn start(args: &[&str], env: &[(&str, String)], cwd: &Path) -> Harness {
         let mut command = Command::new(env!("CARGO_BIN_EXE_melchior"));
-        command.args(args).env_clear().env("PATH", "/usr/local/bin:/usr/bin:/bin");
+        command
+            .args(args)
+            .env_clear()
+            .env("PATH", "/usr/local/bin:/usr/bin:/bin");
         for (name, value) in env {
             command.env(name, value);
         }
-        let mut child =
-            command.current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn().unwrap();
+        let mut child = command
+            .current_dir(cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
-        Harness { child, stdin, stdout, messages: Vec::new() }
+        Harness {
+            child,
+            stdin,
+            stdout,
+            messages: Vec::new(),
+        }
     }
 
     fn send(&mut self, line: String) {
@@ -124,9 +159,16 @@ impl Harness {
     fn read_until(&mut self, done: &dyn Fn(&Json) -> bool) -> Json {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
-            assert!(Instant::now() < deadline, "timed out; saw {:?}", self.messages);
+            assert!(
+                Instant::now() < deadline,
+                "timed out; saw {:?}",
+                self.messages
+            );
             let mut line = String::new();
-            assert!(self.stdout.read_line(&mut line).unwrap() > 0, "harness exited");
+            assert!(
+                self.stdout.read_line(&mut line).unwrap() > 0,
+                "harness exited"
+            );
             let message = json::parse(&line).unwrap();
             self.messages.push(message.clone());
             if done(&message) {
@@ -148,7 +190,10 @@ impl Harness {
             r#"{{"jsonrpc":"2.0","id":"{id}","method":"session/prompt","params":{{"sessionId":"{session}","contentBlocks":[{{"type":"text","text":{}}}]}}}}"#,
             Json::from(text)
         ));
-        self.read_until(&|m| m.get("method").as_str() == Some("session.status") && m.get("params").get("status").as_str() == Some("idle"));
+        self.read_until(&|m| {
+            m.get("method").as_str() == Some("session.status")
+                && m.get("params").get("status").as_str() == Some("idle")
+        });
     }
 
     fn shutdown(mut self) -> Vec<Json> {
@@ -160,7 +205,11 @@ impl Harness {
 }
 
 fn events(messages: &[Json]) -> Vec<&Json> {
-    messages.iter().filter(|m| m.get("method").as_str() == Some("session.event")).map(|m| m.get("params").get("event")).collect()
+    messages
+        .iter()
+        .filter(|m| m.get("method").as_str() == Some("session.event"))
+        .map(|m| m.get("params").get("event"))
+        .collect()
 }
 
 fn last_answer(messages: &[Json]) -> String {
@@ -168,12 +217,24 @@ fn last_answer(messages: &[Json]) -> String {
         .iter()
         .rev()
         .find(|e| e.get("type").as_str() == Some("assistant/message"))
-        .map(|e| e.get("data").get("message").get("content").at(0).get("text").str_or("").to_string())
+        .map(|e| {
+            e.get("data")
+                .get("message")
+                .get("content")
+                .at(0)
+                .get("text")
+                .str_or("")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("melchior-{name}-{}-{}", std::process::id(), melchior::util::random_hex(4)));
+    let dir = std::env::temp_dir().join(format!(
+        "melchior-{name}-{}-{}",
+        std::process::id(),
+        melchior::util::random_hex(4)
+    ));
     std::fs::create_dir_all(dir.join("home")).unwrap();
     std::fs::create_dir_all(dir.join("workspace")).unwrap();
     dir
@@ -193,7 +254,13 @@ fn mcp_result(id: &Json, result: &str) -> String {
 }
 
 fn text_result(id: &Json, text: &str) -> String {
-    mcp_result(id, &format!(r#"{{"content":[{{"type":"text","text":{}}}]}}"#, Json::from(text)))
+    mcp_result(
+        id,
+        &format!(
+            r#"{{"content":[{{"type":"text","text":{}}}]}}"#,
+            Json::from(text)
+        ),
+    )
 }
 
 const DESCRIBE: &str = r#"{"about":{"record":"record","group":"source"},"record_count":42,"group_count":2,"largest_groups":[{"key":"plant_work_orders","records":30}],"filters":[{"field":"kind","distinct":2,"top":[["table_row",40],["document",2]]}]}"#;
@@ -208,17 +275,29 @@ fn gateway(seen: Arc<Mutex<Seen>>) -> Handler {
             let answered = !tool_messages(request).is_empty();
             seen.lock().unwrap().model_requests.push(request.clone());
             let call = tools.iter().any(|t| t == "mcp__tools__files_list") && !answered;
-            return model_reply(call.then_some(("mcp__tools__files_list", "{}")), "Filler 3 had a bearing failure (wo-17).");
+            return model_reply(
+                call.then_some(("mcp__tools__files_list", "{}")),
+                "Filler 3 had a bearing failure (wo-17).",
+            );
         }
         if path != "/mcp" {
             return ("404 Not Found", "text/plain", String::new());
         }
-        let auth = headers.iter().find(|(n, _)| n == "authorization").map(|(_, v)| v.clone()).unwrap_or_default();
+        let auth = headers
+            .iter()
+            .find(|(n, _)| n == "authorization")
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default();
         seen.lock().unwrap().auth.push(auth);
         let id = request.get("id").clone();
         let body = match request.get("method").as_str().unwrap_or("") {
-            "initialize" => mcp_result(&id, r#"{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"loopback"}}"#),
-            m if m.starts_with("notifications/") => return ("202 Accepted", "application/json", String::new()),
+            "initialize" => mcp_result(
+                &id,
+                r#"{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"loopback"}}"#,
+            ),
+            m if m.starts_with("notifications/") => {
+                return ("202 Accepted", "application/json", String::new());
+            }
             "tools/list" => mcp_result(
                 &id,
                 r#"{"tools":[
@@ -233,18 +312,31 @@ fn gateway(seen: Arc<Mutex<Seen>>) -> Handler {
             "tools/call" => {
                 let name = request.get("params").get("name").str_or("").to_string();
                 let arguments = request.get("params").get("arguments").clone();
-                seen.lock().unwrap().mcp_calls.push((name.clone(), arguments.clone()));
+                seen.lock()
+                    .unwrap()
+                    .mcp_calls
+                    .push((name.clone(), arguments.clone()));
                 match name.as_str() {
                     "leviathan.describe" => text_result(&id, DESCRIBE),
                     "leviathan.search" => text_result(&id, SEARCH),
-                    "leviathan.recall" if arguments.get("query").is_null() => text_result(&id, BRIEFING),
+                    "leviathan.recall" if arguments.get("query").is_null() => {
+                        text_result(&id, BRIEFING)
+                    }
                     "leviathan.recall" => text_result(&id, RECALLED),
-                    "leviathan.remember" => text_result(&id, r#"{"status":"created","memory":{"id":"m-new"},"text":"remembered m-new\n"}"#),
+                    "leviathan.remember" => text_result(
+                        &id,
+                        r#"{"status":"created","memory":{"id":"m-new"},"text":"remembered m-new\n"}"#,
+                    ),
                     "files.list" => text_result(&id, "maintenance_log.csv (table)"),
-                    _ => mcp_result(&id, r#"{"content":[{"type":"text","text":"unknown"}],"isError":true}"#),
+                    _ => mcp_result(
+                        &id,
+                        r#"{"content":[{"type":"text","text":"unknown"}],"isError":true}"#,
+                    ),
                 }
             }
-            _ => format!(r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"nope"}}}}"#),
+            _ => format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"nope"}}}}"#
+            ),
         };
         ("200 OK", "application/json", body)
     })
@@ -256,7 +348,10 @@ fn serves_a_turn_with_leviathan_through_a_gateway() {
     let port = serve(gateway(seen.clone()));
     let root = temp_dir("gateway");
     let (home, workspace) = (root.join("home"), root.join("workspace"));
-    let patch = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/data-assistant.patch.yml");
+    let patch = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/data-assistant.patch.yml"
+    );
     let tool_patch = workspace.join(".tools.patch.yml");
     std::fs::write(
         &tool_patch,
@@ -270,7 +365,10 @@ fn serves_a_turn_with_leviathan_through_a_gateway() {
         &["--serve", "--patch", patch, "--patch", &tool_patch],
         &[
             ("MELCHIOR_HOME", home.display().to_string()),
-            ("AGENT_PROMPT", "You are a plant analyst. Use leviathan.search for documents.".into()),
+            (
+                "AGENT_PROMPT",
+                "You are a plant analyst. Use leviathan.search for documents.".into(),
+            ),
             ("AGENT_MODEL", "loopback-model".into()),
             ("MODEL_API_KEY", "model-key".into()),
             ("MODEL_BASE_URL", format!("http://127.0.0.1:{port}/v1")),
@@ -279,64 +377,188 @@ fn serves_a_turn_with_leviathan_through_a_gateway() {
         &workspace,
     );
     let init = harness.initialize(&workspace, "loopback-model");
-    assert_eq!(init.get("result").get("serverInfo").get("name").as_str(), Some("melchior"), "{init}");
-    let tools: Vec<&str> = init.get("result").get("plugins").get("tools").items().iter().filter_map(|t| t.as_str()).collect();
+    assert_eq!(
+        init.get("result").get("serverInfo").get("name").as_str(),
+        Some("melchior"),
+        "{init}"
+    );
+    let tools: Vec<&str> = init
+        .get("result")
+        .get("plugins")
+        .get("tools")
+        .items()
+        .iter()
+        .filter_map(|t| t.as_str())
+        .collect();
     assert!(tools.contains(&"mcp__tools__leviathan_search"), "{tools:?}");
-    assert!(!tools.contains(&"bash") && !tools.contains(&"leviathan_index"), "the patch leaves only gateway tools: {tools:?}");
+    assert!(
+        !tools.contains(&"bash") && !tools.contains(&"leviathan_index"),
+        "the patch leaves only gateway tools: {tools:?}"
+    );
 
-    harness.prompt("p1", "s1", "[Today is Sunday, October 25, 2026.]\n\nWhat failed on filler 3?");
+    harness.prompt(
+        "p1",
+        "s1",
+        "[Today is Sunday, October 25, 2026.]\n\nWhat failed on filler 3?",
+    );
     let messages = harness.shutdown();
 
-    let response = messages.iter().find(|m| m.get("id").as_str() == Some("p1")).unwrap();
+    let response = messages
+        .iter()
+        .find(|m| m.get("id").as_str() == Some("p1"))
+        .unwrap();
     let message_id = response.get("result").get("messageId").as_str().unwrap();
     let events = events(&messages);
-    let spliced = events.iter().find(|e| e.get("type").as_str() == Some("agent/inbox/spliced")).unwrap();
-    assert_eq!(spliced.get("data").get("inserted").at(0).get("id").as_str(), Some(message_id));
-    assert_eq!(last_answer(&messages), "Filler 3 had a bearing failure (wo-17).");
-    assert!(events.iter().any(|e| e.get("type").as_str() == Some("turn/end") && e.get("data").get("reason").get("kind").as_str() == Some("stop")));
+    let spliced = events
+        .iter()
+        .find(|e| e.get("type").as_str() == Some("agent/inbox/spliced"))
+        .unwrap();
+    assert_eq!(
+        spliced.get("data").get("inserted").at(0).get("id").as_str(),
+        Some(message_id)
+    );
+    assert_eq!(
+        last_answer(&messages),
+        "Filler 3 had a bearing failure (wo-17)."
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e.get("type").as_str() == Some("turn/end")
+                && e.get("data").get("reason").get("kind").as_str() == Some("stop"))
+    );
 
     let seen = seen.lock().unwrap();
-    assert!(seen.auth.iter().all(|a| a == "Bearer gateway-token"), "{:?}", seen.auth);
+    assert!(
+        seen.auth.iter().all(|a| a == "Bearer gateway-token"),
+        "{:?}",
+        seen.auth
+    );
     let names: Vec<&str> = seen.mcp_calls.iter().map(|(n, _)| n.as_str()).collect();
-    assert!(names.contains(&"leviathan.describe") && names.contains(&"leviathan.search") && names.contains(&"files.list"), "{names:?}");
-    let (_, search_args) = seen.mcp_calls.iter().find(|(n, _)| n == "leviathan.search").unwrap();
-    assert_eq!(search_args.get("query").as_str(), Some("What failed on filler 3?"), "a leading context line is not part of the query");
+    assert!(
+        names.contains(&"leviathan.describe")
+            && names.contains(&"leviathan.search")
+            && names.contains(&"files.list"),
+        "{names:?}"
+    );
+    let (_, search_args) = seen
+        .mcp_calls
+        .iter()
+        .find(|(n, _)| n == "leviathan.search")
+        .unwrap();
+    assert_eq!(
+        search_args.get("query").as_str(),
+        Some("What failed on filler 3?"),
+        "a leading context line is not part of the query"
+    );
 
     let first = &seen.model_requests[0];
     assert_eq!(first.get("model").as_str(), Some("loopback-model"));
     let system = first.get("messages").at(0).get("content").str_or("");
-    assert!(system.starts_with("You are a plant analyst."), "persona first: {system}");
-    assert!(system.contains("42 records across 2 sources"), "briefing: {system}");
-    assert!(system.contains("leviathan.search → mcp__tools__leviathan_search"), "name map: {system}");
-    assert!(system.find("# Workspace index").unwrap() < system.find("# Tool names").unwrap(), "the briefing leads: {system}");
+    assert!(
+        system.starts_with("You are a plant analyst."),
+        "persona first: {system}"
+    );
+    assert!(
+        system.contains("42 records across 2 sources"),
+        "briefing: {system}"
+    );
+    assert!(
+        system.contains("leviathan.search → mcp__tools__leviathan_search"),
+        "name map: {system}"
+    );
+    assert!(
+        system.find("# Workspace index").unwrap() < system.find("# Tool names").unwrap(),
+        "the briefing leads: {system}"
+    );
     let user = first.get("messages").at(1).to_string();
-    assert!(user.contains("<workspace_recall") && user.contains("Filler 3 bearing failure [id: wo-17]"), "recall: {user}");
+    assert!(
+        user.contains("<workspace_recall") && user.contains("Filler 3 bearing failure [id: wo-17]"),
+        "recall: {user}"
+    );
     assert!(user.contains("<agent_memory") && user.contains("[preference] Sarah · report.format: Sarah wants answers as tables (2026-10-20 · m-pin)"), "memory briefing: {user}");
-    assert!(!user.contains("old question"), "journal events stay out of the briefing: {user}");
-    assert!(user.contains("Is filler 3 running?"), "memory recall: {user}");
-    assert!(!user.contains("Use `recall`"), "Leviathan's own tool advice is not passed on: {user}");
-    assert!(system.contains("# Memory (Leviathan)") && system.contains("`mcp__tools__leviathan_remember`"), "memory guide: {system}");
+    assert!(
+        !user.contains("old question"),
+        "journal events stay out of the briefing: {user}"
+    );
+    assert!(
+        user.contains("Is filler 3 running?"),
+        "memory recall: {user}"
+    );
+    assert!(
+        !user.contains("Use `recall`"),
+        "Leviathan's own tool advice is not passed on: {user}"
+    );
+    assert!(
+        system.contains("# Memory (Leviathan)")
+            && system.contains("`mcp__tools__leviathan_remember`"),
+        "memory guide: {system}"
+    );
 
-    let recalls: Vec<&Json> = seen.mcp_calls.iter().filter(|(n, _)| n == "leviathan.recall").map(|(_, a)| a).collect();
-    assert_eq!(recalls.len(), 2, "one briefing and one query recall on the first turn");
-    assert!(recalls.iter().all(|a| a.get("format").as_str() == Some("json")));
-    assert!(recalls.iter().all(|a| a.get("ns").is_null()), "no namespace unless one is configured");
-    let (_, journal) = seen.mcp_calls.iter().find(|(n, _)| n == "leviathan.remember").expect("the turn is journaled before shutdown");
+    let recalls: Vec<&Json> = seen
+        .mcp_calls
+        .iter()
+        .filter(|(n, _)| n == "leviathan.recall")
+        .map(|(_, a)| a)
+        .collect();
+    assert_eq!(
+        recalls.len(),
+        2,
+        "one briefing and one query recall on the first turn"
+    );
+    assert!(
+        recalls
+            .iter()
+            .all(|a| a.get("format").as_str() == Some("json"))
+    );
+    assert!(
+        recalls.iter().all(|a| a.get("ns").is_null()),
+        "no namespace unless one is configured"
+    );
+    let (_, journal) = seen
+        .mcp_calls
+        .iter()
+        .find(|(n, _)| n == "leviathan.remember")
+        .expect("the turn is journaled before shutdown");
     assert_eq!(journal.get("kind").as_str(), Some("event"));
     assert_eq!(journal.get("source").as_str(), Some("conversation:s1"));
     assert_eq!(
         journal.get("text").as_str(),
-        Some("Asked: \"What failed on filler 3?\". Answered: Filler 3 had a bearing failure (wo-17).")
+        Some(
+            "Asked: \"What failed on filler 3?\". Answered: Filler 3 had a bearing failure (wo-17)."
+        )
     );
     let second = &seen.model_requests[1];
-    assert!(second.get("messages").to_string().contains("maintenance_log.csv"), "tool result reached the model");
+    assert!(
+        second
+            .get("messages")
+            .to_string()
+            .contains("maintenance_log.csv"),
+        "tool result reached the model"
+    );
 
     let log = std::fs::read_to_string(home.join("melchior/sessions/s1/events.jsonl")).unwrap();
-    for kind in ["session/created", "message/user", "message/context", "message/assistant", "tool/result", "turn/end"] {
-        assert!(log.contains(&format!(r#""type":"{kind}""#)), "{kind} missing from the session log");
+    for kind in [
+        "session/created",
+        "message/user",
+        "message/context",
+        "message/assistant",
+        "tool/result",
+        "turn/end",
+    ] {
+        assert!(
+            log.contains(&format!(r#""type":"{kind}""#)),
+            "{kind} missing from the session log"
+        );
     }
-    assert!(log.contains(r#""source":"leviathan-memory""#), "memory context is persisted with the turn");
-    assert!(!log.contains("gateway-token") && !log.contains("model-key"), "secrets never reach the session log");
+    assert!(
+        log.contains(r#""source":"leviathan-memory""#),
+        "memory context is persisted with the turn"
+    );
+    assert!(
+        !log.contains("gateway-token") && !log.contains("model-key"),
+        "secrets never reach the session log"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -346,7 +568,9 @@ fn leviathan_binary() -> Option<PathBuf> {
     if let Ok(bin) = std::env::var("LEVIATHAN_BIN") {
         return Some(PathBuf::from(bin)).filter(|p| p.is_file());
     }
-    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join("leviathan")).find(|p| p.is_file())
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|d| d.join("leviathan"))
+        .find(|p| p.is_file())
 }
 
 const TICKETS: &str = "id,customer,created,title,body\n\
@@ -368,9 +592,24 @@ fn indexes_and_searches_with_a_local_leviathan() {
         }
         seen.lock().unwrap().push(request.clone());
         match tool_messages(request).len() {
-            0 => model_reply(Some(("leviathan_index", r#"{"paths":["tickets.csv"],"id":"id","title":["title"],"group":["customer"],"date":["created"]}"#)), ""),
-            1 => model_reply(Some(("leviathan_search", r#"{"query":"login loop password reset"}"#)), ""),
-            _ => model_reply(None, "T-2: the login loop after a password reset, fixed in 4.2.1."),
+            0 => model_reply(
+                Some((
+                    "leviathan_index",
+                    r#"{"paths":["tickets.csv"],"id":"id","title":["title"],"group":["customer"],"date":["created"]}"#,
+                )),
+                "",
+            ),
+            1 => model_reply(
+                Some((
+                    "leviathan_search",
+                    r#"{"query":"login loop password reset"}"#,
+                )),
+                "",
+            ),
+            _ => model_reply(
+                None,
+                "T-2: the login loop after a password reset, fixed in 4.2.1.",
+            ),
         }
     }));
     let root = temp_dir("local");
@@ -406,30 +645,83 @@ fn indexes_and_searches_with_a_local_leviathan() {
         &workspace,
     );
     let init = harness.initialize(&workspace, "loopback-model");
-    let tools: Vec<&str> = init.get("result").get("plugins").get("tools").items().iter().filter_map(|t| t.as_str()).collect();
-    assert!(tools.contains(&"leviathan_index") && tools.contains(&"memory_remember"), "{tools:?}");
+    let tools: Vec<&str> = init
+        .get("result")
+        .get("plugins")
+        .get("tools")
+        .items()
+        .iter()
+        .filter_map(|t| t.as_str())
+        .collect();
+    assert!(
+        tools.contains(&"leviathan_index") && tools.contains(&"memory_remember"),
+        "{tools:?}"
+    );
 
-    harness.prompt("p1", "s1", "Which ticket is about the login loop after a password reset?");
-    harness.prompt("p2", "s1", "And which customer reported the export timeout?");
+    harness.prompt(
+        "p1",
+        "s1",
+        "Which ticket is about the login loop after a password reset?",
+    );
+    harness.prompt(
+        "p2",
+        "s1",
+        "And which customer reported the export timeout?",
+    );
     let messages = harness.shutdown();
-    assert!(last_answer(&messages).starts_with("T-2"), "{}", last_answer(&messages));
+    assert!(
+        last_answer(&messages).starts_with("T-2"),
+        "{}",
+        last_answer(&messages)
+    );
     assert!(index.is_file(), "the index was built");
 
     let requests = requests.lock().unwrap();
-    let first_system = requests[0].get("messages").at(0).get("content").str_or("").to_string();
-    assert!(first_system.contains("No dataset is indexed yet") && first_system.contains("`leviathan_index`"), "{first_system}");
+    let first_system = requests[0]
+        .get("messages")
+        .at(0)
+        .get("content")
+        .str_or("")
+        .to_string();
+    assert!(
+        first_system.contains("No dataset is indexed yet")
+            && first_system.contains("`leviathan_index`"),
+        "{first_system}"
+    );
     let after_index = &requests[1];
     let results = tool_messages(after_index).join("\n");
-    assert!(results.contains("searchable now"), "index result: {results}");
-    assert!(tool_names(after_index).contains(&"leviathan_search".to_string()), "search appears once data is indexed");
+    assert!(
+        results.contains("searchable now"),
+        "index result: {results}"
+    );
+    assert!(
+        tool_names(after_index).contains(&"leviathan_search".to_string()),
+        "search appears once data is indexed"
+    );
     let after_search = tool_messages(&requests[2]).join("\n");
-    assert!(after_search.contains("T-2"), "search found the ticket: {after_search}");
+    assert!(
+        after_search.contains("T-2"),
+        "search found the ticket: {after_search}"
+    );
 
     // The second message: briefing on the indexed data, recall, and memory.
-    let second = requests.iter().rev().find(|r| r.get("messages").to_string().contains("export timeout")).unwrap();
+    let second = requests
+        .iter()
+        .rev()
+        .find(|r| r.get("messages").to_string().contains("export timeout"))
+        .unwrap();
     let system = second.get("messages").at(0).get("content").str_or("");
-    assert!(system.contains("3 records across 2"), "briefing on the indexed data: {system}");
-    assert!(second.get("messages").to_string().contains("<workspace_recall"), "recall ran on the second message");
+    assert!(
+        system.contains("3 records across 2"),
+        "briefing on the indexed data: {system}"
+    );
+    assert!(
+        second
+            .get("messages")
+            .to_string()
+            .contains("<workspace_recall"),
+        "recall ran on the second message"
+    );
     assert!(memory.is_file(), "answered turns are journaled to memory");
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -470,15 +762,34 @@ fn workspace_data_is_indexed_before_the_first_model_call() {
         .current_dir(&workspace)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let requests = requests.lock().unwrap();
     assert_eq!(requests.len(), 1, "answered in one model call");
     let first = &requests[0];
-    assert!(tool_names(first).contains(&"leviathan_search".to_string()), "{:?}", tool_names(first));
+    assert!(
+        tool_names(first).contains(&"leviathan_search".to_string()),
+        "{:?}",
+        tool_names(first)
+    );
     let system = first.get("messages").at(0).get("content").str_or("");
-    assert!(system.contains("It holds 3 ") && system.contains("indexed the workspace's data before this conversation"), "{system}");
+    assert!(
+        system.contains("It holds 3 ")
+            && system.contains("indexed the workspace's data before this conversation"),
+        "{system}"
+    );
     assert!(system.contains("tickets.csv"), "{system}");
-    assert!(first.get("messages").at(1).to_string().contains("<workspace_recall"), "recall on the first message");
+    assert!(
+        first
+            .get("messages")
+            .at(1)
+            .to_string()
+            .contains("<workspace_recall"),
+        "recall on the first message"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -490,7 +801,10 @@ fn every_kind_of_workspace_data_is_indexed_together() {
         eprintln!("skipped: no leviathan binary (set LEVIATHAN_BIN or put leviathan on PATH)");
         return;
     };
-    let help = Command::new(&bin).args(["upsert", "--help"]).output().unwrap();
+    let help = Command::new(&bin)
+        .args(["upsert", "--help"])
+        .output()
+        .unwrap();
     if !String::from_utf8_lossy(&help.stdout).contains("--kind") {
         eprintln!("skipped: this leviathan predates several kinds per index");
         return;
@@ -522,10 +836,16 @@ fn every_kind_of_workspace_data_is_indexed_together() {
         "{\"order\":\"O-1\",\"customer_id\":\"C-1\",\"total\":120.5}\n{\"order\":\"O-2\",\"customer_id\":\"C-2\",\"total\":42}\n",
     )
     .unwrap();
-    std::fs::write(workspace.join("package.json"), "{\"name\": \"tooling\", \"files\": [\"a\"]}").unwrap();
+    std::fs::write(
+        workspace.join("package.json"),
+        "{\"name\": \"tooling\", \"files\": [\"a\"]}",
+    )
+    .unwrap();
     std::fs::write(
         home.join("settings.yaml"),
-        format!("llm-pi-ai:\n  providers:\n    openrouter:\n      baseURL: http://127.0.0.1:{port}/v1\n"),
+        format!(
+            "llm-pi-ai:\n  providers:\n    openrouter:\n      baseURL: http://127.0.0.1:{port}/v1\n"
+        ),
     )
     .unwrap();
     let path = format!("{}:/usr/bin:/bin", bin.parent().unwrap().display());
@@ -538,14 +858,30 @@ fn every_kind_of_workspace_data_is_indexed_together() {
         .current_dir(&workspace)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let requests = requests.lock().unwrap();
-    let system = requests[0].get("messages").at(0).get("content").str_or("").to_string();
+    let system = requests[0]
+        .get("messages")
+        .at(0)
+        .get("content")
+        .str_or("")
+        .to_string();
     assert!(system.contains("It holds 3 kinds of record"), "{system}");
-    for kind in ["tickets (3 tickets", "customers (2 customers", "orders (2 orders"] {
+    for kind in [
+        "tickets (3 tickets",
+        "customers (2 customers",
+        "orders (2 orders",
+    ] {
         assert!(system.contains(kind), "{kind}: {system}");
     }
-    assert!(!system.contains("package"), "tool configuration is not data: {system}");
+    assert!(
+        !system.contains("package"),
+        "tool configuration is not data: {system}"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -562,11 +898,27 @@ fn headless_task_starts_leviathan_without_configuration() {
             return ("404 Not Found", "text/plain", String::new());
         }
         match tool_messages(request).len() {
-            0 => model_reply(Some(("leviathan_index", r#"{"paths":["tickets.csv"],"id":"id","group":["customer"]}"#)), ""),
-            1 => model_reply(Some(("leviathan_search", r#"{"query":"export times out"}"#)), ""),
+            0 => model_reply(
+                Some((
+                    "leviathan_index",
+                    r#"{"paths":["tickets.csv"],"id":"id","group":["customer"]}"#,
+                )),
+                "",
+            ),
+            1 => model_reply(
+                Some(("leviathan_search", r#"{"query":"export times out"}"#)),
+                "",
+            ),
             _ => {
                 let found = tool_messages(request).join("\n");
-                model_reply(None, if found.contains("T-3") { "Globex (T-3)." } else { "not found" })
+                model_reply(
+                    None,
+                    if found.contains("T-3") {
+                        "Globex (T-3)."
+                    } else {
+                        "not found"
+                    },
+                )
             }
         }
     }));
@@ -575,7 +927,9 @@ fn headless_task_starts_leviathan_without_configuration() {
     std::fs::write(workspace.join("tickets.csv"), TICKETS).unwrap();
     std::fs::write(
         home.join("settings.yaml"),
-        format!("llm-pi-ai:\n  providers:\n    openrouter:\n      baseURL: http://127.0.0.1:{port}/v1\n"),
+        format!(
+            "llm-pi-ai:\n  providers:\n    openrouter:\n      baseURL: http://127.0.0.1:{port}/v1\n"
+        ),
     )
     .unwrap();
     let path = format!("{}:/usr/bin:/bin", bin.parent().unwrap().display());
@@ -589,9 +943,23 @@ fn headless_task_starts_leviathan_without_configuration() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(stdout.trim(), "Globex (T-3).");
-    let indexes: Vec<PathBuf> = std::fs::read_dir(home.join("leviathan")).unwrap().flatten().map(|e| e.path()).collect();
-    assert!(indexes.iter().any(|p| p.extension().is_some_and(|e| e == "db") && !p.to_string_lossy().contains("memory")), "{indexes:?}");
+    let indexes: Vec<PathBuf> = std::fs::read_dir(home.join("leviathan"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert!(
+        indexes
+            .iter()
+            .any(|p| p.extension().is_some_and(|e| e == "db")
+                && !p.to_string_lossy().contains("memory")),
+        "{indexes:?}"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }

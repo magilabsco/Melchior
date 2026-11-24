@@ -56,7 +56,12 @@ pub fn profiles() -> Vec<(String, Vec<Entry>)> {
         Entry::new("tool-subagent"),
         Entry::new("agent-loop"),
     ];
-    let minimal = vec![Entry::new("system-prompt"), Entry::new("llm-pi-ai"), Entry::new("llm-deepseek"), Entry::new("agent-loop")];
+    let minimal = vec![
+        Entry::new("system-prompt"),
+        Entry::new("llm-pi-ai"),
+        Entry::new("llm-deepseek"),
+        Entry::new("agent-loop"),
+    ];
     vec![
         ("default".into(), default.clone()),
         // DeepSeek Harness's names for the same set.
@@ -118,12 +123,18 @@ impl Plugin for SystemPrompt {
     fn apply(&self, ctx: &Context) -> Result<(), String> {
         let prompt = ctx.inject::<PromptService>("prompt")?;
         let config = ctx.config();
-        let persona = config.get("personaPrefix").as_str().or(config.get("persona").as_str()).unwrap_or("");
+        let persona = config
+            .get("personaPrefix")
+            .as_str()
+            .or(config.get("persona").as_str())
+            .unwrap_or("");
         prompt.set_persona(persona);
         let restore = prompt.clone();
         ctx.effect(move || restore.set_persona(""));
         if config.get("environment").as_bool() != Some(false) {
-            prompt.sections.add(ctx, "harness/environment", Box::new(environment_section))?;
+            prompt
+                .sections
+                .add(ctx, "harness/environment", Box::new(environment_section))?;
         }
         Ok(())
     }
@@ -135,7 +146,11 @@ fn environment_section(cx: &crate::prompt::PromptCx<'_>) -> Option<String> {
         text.push_str(&format!(
             "\nWorkspace directory: {}{}",
             cx.runtime.cwd.display(),
-            if cx.runtime.full_access() { " (full access: commands and files are not sandboxed)." } else { " (file and shell access is confined to it)." }
+            if cx.runtime.full_access() {
+                " (full access: commands and files are not sandboxed)."
+            } else {
+                " (file and shell access is confined to it)."
+            }
         ));
     }
     text.push_str("\nTool calls run in order; when several independent lookups are needed, request them in the same response.");
@@ -162,9 +177,15 @@ impl Plugin for LlmPiAi {
         for (id, config) in ctx.config().get("providers").entries() {
             let api = config.get("api").str_or("openai-completions");
             if api != "openai-completions" && api != "openai" {
-                return Err(format!("llm-pi-ai: provider {id:?} uses api {api:?}; only openai-completions is supported"));
+                return Err(format!(
+                    "llm-pi-ai: provider {id:?} uses api {api:?}; only openai-completions is supported"
+                ));
             }
-            let (base, key_env) = if id == "openrouter" { (OPENROUTER_BASE, "OPENROUTER_API_KEY") } else { ("", "DEEPSEEK_API_KEY") };
+            let (base, key_env) = if id == "openrouter" {
+                (OPENROUTER_BASE, "OPENROUTER_API_KEY")
+            } else {
+                ("", "DEEPSEEK_API_KEY")
+            };
             let provider = OpenAiCompatible::from_config(id, config, base, key_env);
             if provider.base_url.is_empty() {
                 return Err(format!("llm-pi-ai: provider {id:?} needs baseURL"));
@@ -197,8 +218,17 @@ impl Plugin for LlmDeepSeek {
         {
             config.set("baseURL", base);
         }
-        let provider = OpenAiCompatible::from_config("deepseek-official", &config, DEEPSEEK_BASE, "DEEPSEEK_API_KEY");
-        registry.add(ctx, "deepseek-official", Box::new(provider) as Box<dyn Provider>)
+        let provider = OpenAiCompatible::from_config(
+            "deepseek-official",
+            &config,
+            DEEPSEEK_BASE,
+            "DEEPSEEK_API_KEY",
+        );
+        registry.add(
+            ctx,
+            "deepseek-official",
+            Box::new(provider) as Box<dyn Provider>,
+        )
     }
 }
 
@@ -211,14 +241,29 @@ impl Plugin for AgentLoop {
         "agent-loop"
     }
     fn inject(&self) -> &'static [&'static str] {
-        &["runtime", "llm", "tools", "prompt", "turn-hooks", "turn-end-hooks"]
+        &[
+            "runtime",
+            "llm",
+            "tools",
+            "prompt",
+            "turn-hooks",
+            "turn-end-hooks",
+        ]
     }
     fn apply(&self, ctx: &Context) -> Result<(), String> {
         let runtime = ctx.inject::<Runtime>("runtime")?;
         let registry = ctx.inject::<LlmRegistry>("llm")?;
         let provider = llm::select(&registry, &runtime.provider).ok_or_else(|| {
             let known: Vec<String> = registry.all().into_iter().map(|(id, _)| id).collect();
-            format!("no LLM provider {:?} is configured (configured: {})", runtime.provider, if known.is_empty() { "none".into() } else { known.join(", ") })
+            format!(
+                "no LLM provider {:?} is configured (configured: {})",
+                runtime.provider,
+                if known.is_empty() {
+                    "none".into()
+                } else {
+                    known.join(", ")
+                }
+            )
         })?;
         let agent = Agent {
             app: ctx.app().clone(),
@@ -250,7 +295,11 @@ impl Plugin for ToolGoal {
         add_tool(ctx, Box::new(goal::CreateGoal))?;
         add_tool(ctx, Box::new(goal::UpdateGoal))?;
         let prompt = ctx.inject::<PromptService>("prompt")?;
-        prompt.sections.add(ctx, "goal", Box::new(|cx| goal::prompt_section(&cx.session.state(goal::STATE_KEY))))
+        prompt.sections.add(
+            ctx,
+            "goal",
+            Box::new(|cx| goal::prompt_section(&cx.session.state(goal::STATE_KEY))),
+        )
     }
 }
 
@@ -266,7 +315,11 @@ impl Plugin for ToolTodo {
     fn apply(&self, ctx: &Context) -> Result<(), String> {
         add_tool(ctx, Box::new(todo::TodoWrite))?;
         let prompt = ctx.inject::<PromptService>("prompt")?;
-        prompt.sections.add(ctx, "todo", Box::new(|cx| todo::prompt_section(&cx.session.state(todo::STATE_KEY))))
+        prompt.sections.add(
+            ctx,
+            "todo",
+            Box::new(|cx| todo::prompt_section(&cx.session.state(todo::STATE_KEY))),
+        )
     }
 }
 
@@ -397,11 +450,22 @@ impl Plugin for ToolSkill {
     fn apply(&self, ctx: &Context) -> Result<(), String> {
         let runtime = ctx.inject::<Runtime>("runtime")?;
         let mut dirs = vec![runtime.home.join("skills"), runtime.cwd.join(".skills")];
-        dirs.extend(ctx.config().get("dirs").items().iter().filter_map(|d| d.as_str()).map(|d| runtime.resolve_path(d)));
+        dirs.extend(
+            ctx.config()
+                .get("dirs")
+                .items()
+                .iter()
+                .filter_map(|d| d.as_str())
+                .map(|d| runtime.resolve_path(d)),
+        );
         add_tool(ctx, Box::new(skill::SkillTool { dirs: dirs.clone() }))?;
         let prompt = ctx.inject::<PromptService>("prompt")?;
         let dirs: Vec<PathBuf> = dirs;
-        prompt.sections.add(ctx, "skills", Box::new(move |_cx| skill::prompt_section(&skill::discover(&dirs))))
+        prompt.sections.add(
+            ctx,
+            "skills",
+            Box::new(move |_cx| skill::prompt_section(&skill::discover(&dirs))),
+        )
     }
 }
 
@@ -450,7 +514,12 @@ impl Plugin for McpClient {
         let attempt = Arc::new(Mutex::new(()));
         let last_try = Arc::new(AtomicU64::new(0));
         let connect = {
-            let (server, ctx, attempt, last_try) = (server.clone(), ctx.clone(), attempt.clone(), last_try.clone());
+            let (server, ctx, attempt, last_try) = (
+                server.clone(),
+                ctx.clone(),
+                attempt.clone(),
+                last_try.clone(),
+            );
             move || {
                 let _one = attempt.lock().unwrap();
                 if server.connected.load(Ordering::SeqCst) {
@@ -461,11 +530,22 @@ impl Plugin for McpClient {
                     Ok(()) => {
                         let tools = server.tools.lock().unwrap().clone();
                         for raw in tools {
-                            if let Err(e) = add_tool(&ctx, Box::new(McpTool { server: server.clone(), raw })) {
+                            if let Err(e) = add_tool(
+                                &ctx,
+                                Box::new(McpTool {
+                                    server: server.clone(),
+                                    raw,
+                                }),
+                            ) {
                                 log_warn!("mcp", "{}: {e}", server.name);
                             }
                         }
-                        log_info!("mcp", "{}: {} tools", server.name, server.tools.lock().unwrap().len());
+                        log_info!(
+                            "mcp",
+                            "{}: {} tools",
+                            server.name,
+                            server.tools.lock().unwrap().len()
+                        );
                     }
                     Err(e) => log_warn!("mcp", "{e}; will retry before the next turn"),
                 }
@@ -480,7 +560,8 @@ impl Plugin for McpClient {
             &format!("mcp/{}/reconnect", server.name),
             Box::new(move |_cx| {
                 if !retry_server.connected.load(Ordering::SeqCst)
-                    && util::unix_millis().saturating_sub(retry_last.load(Ordering::SeqCst)) >= 15_000
+                    && util::unix_millis().saturating_sub(retry_last.load(Ordering::SeqCst))
+                        >= 15_000
                 {
                     connect();
                 }
@@ -502,8 +583,11 @@ impl Plugin for McpClient {
 /// their function names. Spell out the mapping once.
 fn tool_name_section(server: &McpServer) -> Option<String> {
     let tools = server.tools.lock().unwrap();
-    let renamed: Vec<String> =
-        tools.iter().filter(|t| t.public_name != t.name).map(|t| format!("{} → {}", t.name, t.public_name)).collect();
+    let renamed: Vec<String> = tools
+        .iter()
+        .filter(|t| t.public_name != t.name)
+        .map(|t| format!("{} → {}", t.name, t.public_name))
+        .collect();
     if renamed.is_empty() {
         return None;
     }
@@ -528,13 +612,21 @@ pub fn build_entries(
             let path = home.join(file);
             if path.is_file() {
                 let patch = crate::cordis::loader::read_patch_file(&path)?;
-                warnings.extend(crate::cordis::loader::apply_patch(&mut entries, &patch, &path.display().to_string())?);
+                warnings.extend(crate::cordis::loader::apply_patch(
+                    &mut entries,
+                    &patch,
+                    &path.display().to_string(),
+                )?);
             }
         }
     }
     for path in patches {
         let patch = crate::cordis::loader::read_patch_file(path)?;
-        warnings.extend(crate::cordis::loader::apply_patch(&mut entries, &patch, &path.display().to_string())?);
+        warnings.extend(crate::cordis::loader::apply_patch(
+            &mut entries,
+            &patch,
+            &path.display().to_string(),
+        )?);
     }
     Ok((entries, warnings))
 }

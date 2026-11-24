@@ -29,7 +29,12 @@ pub struct Runtime {
 
 /// Variables that carry credentials for the harness itself and must never
 /// reach a child process. Plugins add their own with `add_secret_env`.
-const SECRET_ENVS: &[&str] = &["DEEPSEEK_API_KEY", "OPENROUTER_API_KEY", "LEVIATHAN_TOKEN", "DSH_SYSTEM_PROMPT"];
+const SECRET_ENVS: &[&str] = &[
+    "DEEPSEEK_API_KEY",
+    "OPENROUTER_API_KEY",
+    "LEVIATHAN_TOKEN",
+    "DSH_SYSTEM_PROMPT",
+];
 
 impl Runtime {
     pub fn new(
@@ -41,7 +46,8 @@ impl Runtime {
         max_tokens: Option<i64>,
         notifier: Arc<Notifier>,
     ) -> Runtime {
-        let mode = std::env::var("MELCHIOR_PERMISSION_MODE").or_else(|_| std::env::var("DSH_PERMISSION_MODE"));
+        let mode = std::env::var("MELCHIOR_PERMISSION_MODE")
+            .or_else(|_| std::env::var("DSH_PERMISSION_MODE"));
         let permission = match mode.as_deref() {
             Ok("danger-full-access") => Permission::FullAccess,
             _ => Permission::Workspace,
@@ -73,11 +79,17 @@ impl Runtime {
     /// Environment for tool subprocesses: the harness environment minus its credentials.
     pub fn child_env(&self) -> Vec<(String, String)> {
         let secrets = self.secret_envs.lock().unwrap();
-        std::env::vars().filter(|(k, _)| !secrets.iter().any(|s| s == k)).collect()
+        std::env::vars()
+            .filter(|(k, _)| !secrets.iter().any(|s| s == k))
+            .collect()
     }
 
     pub fn resolve_path(&self, path: &str) -> PathBuf {
         let path = Path::new(path);
-        if path.is_absolute() { path.to_path_buf() } else { self.cwd.join(path) }
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.cwd.join(path)
+        }
     }
 }
