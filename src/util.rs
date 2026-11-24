@@ -203,8 +203,11 @@ mod tests {
         assert!(valid_session_id("saved-session"));
         assert!(valid_session_id("a.b_c-1"));
         assert!(!valid_session_id(".."));
+        assert!(!valid_session_id("."));
         assert!(!valid_session_id("a/b"));
         assert!(!valid_session_id(""));
+        assert!(valid_session_id(&"a".repeat(128)));
+        assert!(!valid_session_id(&"a".repeat(129)));
     }
 
     #[test]
